@@ -1,0 +1,31 @@
+title: Suspicious PowerShell EncodedCommand Execution
+id: b9d9f5b0-1a3a-4a7a-9b1a-1f0a6a7b1234
+status: experimental
+description: Detects PowerShell execution using the -EncodedCommand flag, commonly used to obfuscate malicious payloads and bypass simple string-based logging.
+references:
+    - https://attack.mitre.org/techniques/T1059/001/
+author: detection-forge examples
+date: 2024-01-01
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\powershell.exe'
+        CommandLine|contains:
+            - '-EncodedCommand'
+            - '-enc '
+            - ' -e '
+    filter_main_generic:
+        ParentImage|endswith:
+            - '\explorer.exe'
+        CommandLine|contains: '-ExecutionPolicy Bypass -File'
+    condition: selection and not filter_main_generic
+falsepositives:
+    - Legitimate administrative scripts that encode commands for line-length or character-escaping reasons
+level: medium
+tags:
+    - attack.execution
+    - attack.t1059.001
+    - attack.defense_evasion
+    - attack.t1027

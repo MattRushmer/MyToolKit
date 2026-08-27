@@ -1,0 +1,31 @@
+title: Suspicious Process Access to LSASS Memory
+id: d4f5b6c7-3c5c-4d0b-9a4b-3b2c4d5e6f70
+status: experimental
+description: Detects a process requesting a high-privilege access mask to lsass.exe, a common precursor to credential dumping tools (e.g. Mimikatz-style techniques).
+references:
+    - https://attack.mitre.org/techniques/T1003/001/
+author: detection-forge examples
+date: 2024-01-01
+logsource:
+    category: process_access
+    product: windows
+detection:
+    selection:
+        TargetImage|endswith: '\lsass.exe'
+        GrantedAccess:
+            - '0x1010'
+            - '0x1410'
+            - '0x1438'
+            - '0x143a'
+            - '0x1fffff'
+    filter_known_tools:
+        SourceImage|endswith:
+            - '\MsMpEng.exe'
+            - '\werfault.exe'
+    condition: selection and not filter_known_tools
+falsepositives:
+    - Endpoint protection and crash-reporting tools performing legitimate LSASS inspection
+level: high
+tags:
+    - attack.credential_access
+    - attack.t1003.001

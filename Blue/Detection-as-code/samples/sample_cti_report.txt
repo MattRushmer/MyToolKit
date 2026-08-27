@@ -1,0 +1,46 @@
+Threat Intelligence Report: "GoldenJackal" Phishing Intrusion Set — Preliminary Analysis
+
+Summary
+-------
+Between March and April 2024, our incident response team observed a targeted
+phishing campaign against finance-sector organizations, tracked internally as
+GoldenJackal. The campaign delivers a malicious HTML Application (HTA)
+attachment disguised as an invoice ("Invoice_44291.hta"). When a victim opens
+the attachment, mshta.exe is launched with a remote script protocol handler
+pointing at attacker infrastructure (hxxp://185.220.101.5/loader.hta),
+consistent with MITRE ATT&CK technique T1218.005 (Mshta).
+
+Execution Chain
+----------------
+1. Initial access: phishing email with HTA attachment (T1566.001).
+2. mshta.exe is spawned by outlook.exe or a browser process and immediately
+   retrieves a second-stage script over HTTP using a "javascript:" protocol
+   handler in its command line (T1218.005).
+3. The second stage drops an obfuscated PowerShell loader to
+   C:\Users\Public\update.exe and executes it via
+   "powershell.exe -EncodedCommand <base64>" to bypass simple command-line
+   string detections (T1059.001, T1027).
+4. The PowerShell loader beacons to the same C2 IP, 185.220.101.5, and to a
+   secondary domain, evil-c2-domain.xyz, over HTTPS at irregular intervals.
+5. In several confirmed intrusions, the actor was subsequently observed
+   requesting a highly privileged access mask (0x1438) against lsass.exe from
+   the PowerShell loader process, consistent with an in-memory credential
+   dumping attempt (T1003.001) rather than a dropped Mimikatz binary — no
+   additional file was written to disk at this stage in any case we reviewed.
+
+Indicators of Compromise
+-------------------------
+- SHA256: 3a7bd3e2360a3d2a3a90d0f4b6a2b0f0a3a7bd3e2360a3d2a3a90d0f4b6a2b0f (update.exe payload)
+- C2 IP: 185.220.101.5
+- C2 domain: evil-c2-domain.xyz
+- Dropped file path: C:\Users\Public\update.exe
+- HTA lure filename: Invoice_44291.hta
+
+Recommended Detection Coverage
+-------------------------------
+Defenders should prioritize detection on step 2 (mshta.exe with a remote
+script protocol handler) and step 3 (powershell.exe -EncodedCommand spawned
+from a non-standard parent, or LSASS access requests from PowerShell-family
+processes) since these behaviors are both distinctive and precede the
+credential-access stage. IP/domain-based detection alone is insufficient
+since the actor rotates C2 infrastructure between waves.

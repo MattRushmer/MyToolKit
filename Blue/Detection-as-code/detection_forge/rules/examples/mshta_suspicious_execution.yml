@@ -1,0 +1,28 @@
+title: Suspicious Mshta.exe Execution From Uncommon Parent
+id: c1e2a7d4-2b4b-4c9a-8f3a-2a1b3c4d5e6f
+status: experimental
+description: Detects mshta.exe launching with a script protocol handler or from a parent process not commonly associated with legitimate HTA usage, often seen in phishing-delivered initial access.
+references:
+    - https://attack.mitre.org/techniques/T1218/005/
+author: detection-forge examples
+date: 2024-01-01
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_img:
+        Image|endswith: '\mshta.exe'
+    selection_cli:
+        CommandLine|contains:
+            - 'javascript:'
+            - 'vbscript:'
+            - 'http://'
+            - 'https://'
+    condition: selection_img and selection_cli
+falsepositives:
+    - Internal line-of-business HTA applications launched with remote script protocol arguments
+level: high
+tags:
+    - attack.defense_evasion
+    - attack.execution
+    - attack.t1218.005
