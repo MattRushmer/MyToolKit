@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soc-copilot"
+version = "0.1.0"
+description = "Multi-tenant AI triage copilot for MSPs: correlate alerts from a dozen dashboards into incidents, get an LLM verdict + playbook + PSA-ready ticket note."
+requires-python = ">=3.10"
+
+[project.scripts]
+soc-copilot = "cli.main:app"
+
+[tool.setuptools]
+packages = ["soc_copilot", "cli", "webapp"]
