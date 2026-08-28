@@ -58,6 +58,7 @@ class Alert:
     category: str = ""  # coarse bucket: "malware", "login", "phishing", "lateral_movement", ...
     title: str = ""
     description: str = ""
+    severity: Severity = Severity.MEDIUM  # normalized during ingest, drives correlation/heuristics
     severity_raw: str = ""  # the source product's own severity label, kept for the analyst
     raw: dict[str, Any] = field(default_factory=dict)  # original row, for the ticket note / audit trail
 

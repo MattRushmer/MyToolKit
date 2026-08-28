@@ -107,6 +107,7 @@ def normalize_row(row: dict[str, Any], client_id: str, source: str, adapter: Ada
         category=(fields.get("category") or adapter.default_category or "uncategorized").lower(),
         title=fields.get("title") or "(untitled alert)",
         description=fields.get("description", ""),
+        severity=map_severity(fields.get("severity_raw", ""), adapter),
         severity_raw=fields.get("severity_raw", ""),
         raw=dict(row),
     )
@@ -122,13 +123,11 @@ def load_alerts_from_csv(path: Path, client_id: str, source: str = "generic") ->
     reader = csv.DictReader(text.splitlines())
     alerts: list[Alert] = []
     warnings: list[str] = []
-    severity_map = adapter.severity_map
     for i, row in enumerate(reader, start=2):  # header is line 1
         alert, warning = normalize_row(row, client_id, source, adapter)
         if warning:
             warnings.append(f"{path.name}:{i}: {warning}")
             continue
-        alert.severity_raw = alert.severity_raw or ""
         alerts.append(alert)
     return alerts, warnings
 
