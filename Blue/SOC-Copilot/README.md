@@ -171,3 +171,13 @@ samples/        two clients' worth of realistic multi-source sample alert export
 - **Pricing numbers in `economics/pricing.py` are illustrative defaults**,
   not a market survey - see [PRICING.md](PRICING.md). Edit them for your own
   LLM spend (tracked for real in `economics/cost.py`) and labor overhead.
+- **The web app's upload-size guard has one gap.** `webapp/main.py` rejects
+  a request by its declared `Content-Length` before the body is parsed, and
+  separately bounds each file to 25MB while streaming it into the app's own
+  temp directory - but a client using chunked transfer-encoding (no
+  `Content-Length` header) skips the first check, so Starlette's own
+  multipart parser still buffers that request before either guard runs. If
+  you deploy this somewhere reachable by untrusted clients rather than
+  running it locally/internally, also set a body-size limit at the reverse
+  proxy (nginx `client_max_body_size`, Caddy `request_body`, etc.), which
+  doesn't have this blind spot.

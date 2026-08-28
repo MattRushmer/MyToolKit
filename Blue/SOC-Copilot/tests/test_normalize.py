@@ -128,3 +128,46 @@ def test_malformed_ndjson_line_is_skipped_not_fatal(tmp_path):
     assert len(alerts) == 2
     assert len(warnings) == 1
     assert "invalid JSON" in warnings[0]
+
+
+def test_pathologically_nested_ndjson_line_is_skipped_not_a_crash(tmp_path):
+    """RecursionError from a single hostile line must not propagate uncaught -
+    this is the NDJSON-branch sibling of the JSON-array RecursionError guard;
+    a security review found the array branch was guarded but this one wasn't."""
+    nested_line = '{"a":' * 3000 + "1" + "}" * 3000
+    path = tmp_path / "hostile.ndjson"
+    path.write_text(nested_line + "\n", encoding="utf-8")
+
+    alerts, warnings = load_alerts_from_json(path, "client-a")
+
+    assert alerts == []
+    assert len(warnings) == 1
+    assert "too large/deeply nested" in warnings[0]
+
+
+def test_pathologically_nested_json_array_raises_controlled_ingest_error(tmp_path):
+    nested = "[" * 3000 + "]" * 3000
+    path = tmp_path / "hostile.json"
+    path.write_text(nested, encoding="utf-8")
+
+    with pytest.raises(IngestError, match="too large/deeply nested"):
+        load_alerts_from_json(path, "client-a")
+
+
+def test_field_beyond_default_csv_limit_no_longer_crashes(tmp_path):
+    """Python's csv module defaults to a 128KB field-size limit - a single
+    verbose (legitimate) EDR description field can exceed that. normalize.py
+    raises the process-wide limit; this confirms a field past the *old*
+    default still parses instead of raising csv.Error."""
+    big_field = "A" * (200 * 1024)
+    path = tmp_path / "big_field.csv"
+    path.write_text(
+        f"Timestamp,Title,Description\n2026-01-01T00:00:00Z,Ok Row,normal\n2026-01-02T00:00:00Z,Big Row,{big_field}\n",
+        encoding="utf-8",
+    )
+
+    alerts, warnings = load_alerts_from_csv(path, "client-a")
+
+    assert warnings == []
+    assert len(alerts) == 2
+    assert len(alerts[1].description) == len(big_field)
