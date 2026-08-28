@@ -1,0 +1,46 @@
+[
+  {
+    "detection_id": "CS-77321",
+    "display_name": "Credential access via LSASS memory dump",
+    "severity_name": "High",
+    "hostname": "GLX-DC01",
+    "tactic": "Credential Access",
+    "technique": "OS Credential Dumping",
+    "timestamp": "2026-08-21T03:11:09Z",
+    "description": "procdump.exe used to dump lsass.exe memory",
+    "user_name": "svc_backup"
+  },
+  {
+    "detection_id": "CS-77322",
+    "display_name": "Suspicious child process of lsass.exe",
+    "severity_name": "High",
+    "hostname": "GLX-DC01",
+    "tactic": "Credential Access",
+    "technique": "OS Credential Dumping",
+    "timestamp": "2026-08-21T03:12:47Z",
+    "description": "lsass.exe spawned cmd.exe, highly anomalous for a domain controller",
+    "user_name": "svc_backup"
+  },
+  {
+    "detection_id": "CS-77330",
+    "display_name": "Malicious macro executed",
+    "severity": "55",
+    "hostname": "GLX-WKS-04",
+    "tactic": "Initial Access",
+    "technique": "Phishing",
+    "timestamp": "2026-08-16T11:40:00Z",
+    "description": "winword.exe spawned powershell.exe immediately after macro execution",
+    "user_name": "tallen"
+  },
+  {
+    "detection_id": "CS-77340",
+    "display_name": "Port scan detected from workstation",
+    "severity_name": "Low",
+    "hostname": "GLX-WKS-11",
+    "tactic": "Discovery",
+    "technique": "Network Service Scanning",
+    "timestamp": "2026-08-15T08:05:00Z",
+    "description": "Outbound scan of internal /24 subnet from a single host",
+    "user_name": "rpierce"
+  }
+]

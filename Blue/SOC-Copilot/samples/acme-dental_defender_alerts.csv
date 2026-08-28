@@ -1,0 +1,5 @@
+AlertId,Title,Severity,Category,DeviceName,Timestamp,Description,AccountName
+DFD-1001,Suspicious PowerShell encoded command,High,Execution,ACME-WKS-07,2026-08-20T09:14:02Z,powershell.exe executed with -enc flag launched from Outlook.exe,jsmith
+DFD-1002,Process injection detected,High,DefenseEvasion,ACME-WKS-07,2026-08-20T09:16:40Z,rundll32.exe injected into explorer.exe,jsmith
+DFD-1003,Suspicious sign-in - impossible travel,Medium,InitialAccess,ACME-VPN,2026-08-19T22:03:11Z,Sign-in from Lagos NG then Chicago US within 40 minutes,mkramer
+DFD-1004,Antivirus definition update failed,Low,Configuration,ACME-WKS-12,2026-08-18T06:00:00Z,Defender signature update failed 3 times,

@@ -1,0 +1,3 @@
+Report ID,Title,Severity,Hostname,Created At,Summary,Username
+HTX-501,Ransomware canary file triggered,Critical,ACME-WKS-07,2026-08-20T09:18:55Z,Canary file modification detected consistent with ransomware encryption behavior,jsmith
+HTX-502,Suspicious persistence - registry Run key,Medium,ACME-WKS-19,2026-08-17T14:22:10Z,New Run key pointing to script in AppData\Roaming,kwong
