@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SOC Copilot — {{ result.client.name }}</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell">
+<a class="back-link" href="/">&larr; New run</a>
+<header><h1>{{ result.client.name }}</h1><p>{{ result.client.client_id }} · tier: {{ result.client.criticality_tier }}</p></header>
+
+{% if not has_llm_key %}<div class="alert warning">ANTHROPIC_API_KEY is not configured — every verdict below is the heuristic fallback (flags for review only; it never clears an alert as false-positive). Set the key and re-run for real triage. See README.md.</div>{% endif %}
+
+<div class="stat-row">
+  <div class="stat"><div class="num">{{ result.total_alerts_ingested }}</div><div class="label">Alerts ingested</div></div>
+  <div class="stat"><div class="num">{{ result.incidents|length }}</div><div class="label">Incidents</div></div>
+  <div class="stat"><div class="num">{{ result.needs_review_count }}</div><div class="label">Flagged for review</div></div>
+  <div class="stat"><div class="num">${{ "%.4f"|format(result.total_cost_usd) }}</div><div class="label">Estimated triage cost</div></div>
+</div>
+
+<div class="panel">
+<h2 style="margin-top:0">Incident queue</h2>
+<table>
+<thead><tr><th>Priority</th><th>Severity</th><th>Host / User</th><th>Sources</th><th>Verdict</th><th>Confidence</th><th>Summary</th></tr></thead>
+<tbody>
+{% for r in result.incidents %}
+<tr class="incident-row" onclick="document.getElementById('detail-{{ loop.index }}').scrollIntoView({behavior:'smooth'})">
+  <td><span class="badge {{ r.triage.suggested_priority.value }}">{{ r.triage.suggested_priority.value }}</span></td>
+  <td>{{ r.triage.severity.value }}</td>
+  <td>{{ r.incident.host or r.incident.user or "—" }}</td>
+  <td>{{ r.incident.sources|join(", ") }}</td>
+  <td>{{ r.triage.verdict.value }}</td>
+  <td>{{ r.triage.confidence }}%</td>
+  <td>{{ r.triage.summary }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+{% for r in result.incidents %}
+<div class="panel" id="detail-{{ loop.index }}">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 style="margin:0">{{ r.incident.host or r.incident.user }} — {{ r.recommendation.playbook_name }}</h3>
+    <button class="secondary" onclick="copyTicket({{ loop.index }})">Copy ticket note</button>
+  </div>
+  <pre class="ticket" id="ticket-{{ loop.index }}">{{ r.ticket_note_markdown }}</pre>
+</div>
+{% endfor %}
+
+<div class="panel">
+  <h2 style="margin-top:0">Client digest</h2>
+  <pre class="ticket">{{ digest }}</pre>
+</div>
+
+</main>
+<script>
+function copyTicket(i) {
+  const text = document.getElementById('ticket-' + i).innerText;
+  navigator.clipboard.writeText(text);
+}
+</script>
+</body></html>

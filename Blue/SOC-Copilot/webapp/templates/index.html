@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SOC Copilot</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="shell">
+<header><h1>SOC Copilot</h1><p>Upload alert exports for one client, get a correlated, triaged, ticket-ready incident queue back.</p></header>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if not has_llm_key %}<div class="alert warning">ANTHROPIC_API_KEY is not configured. Incidents will use the heuristic fallback (flag-for-review only, no real verdict) until it's set — see README.md.</div>{% endif %}
+<form method="post" action="/run" enctype="multipart/form-data" class="panel" id="run-form">
+  <div class="row">
+    <div><label for="client_id">Client ID</label><input type="text" id="client_id" name="client_id" placeholder="acme-dental" required></div>
+    <div><label for="client_name">Client name</label><input type="text" id="client_name" name="client_name" placeholder="Acme Dental Group" required></div>
+    <div><label for="tier">Criticality tier</label><select id="tier" name="tier">
+      <option value="standard">standard</option>
+      <option value="high">high</option>
+      <option value="crown_jewel">crown_jewel</option>
+    </select></div>
+  </div>
+
+  <label>Alert export files</label>
+  <p class="hint">Add one row per dashboard export. Pick the matching source so columns map correctly — "generic" works for anything with common column names (host, severity, timestamp, ...).</p>
+  <div id="file-rows">
+    <div class="file-row">
+      <input type="file" name="alert_files" accept=".csv,.json,.ndjson,.jsonl">
+      <select name="alert_sources">
+        {% for name in adapters %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <button type="button" class="secondary" id="add-row">+ Add another file</button>
+
+  <div class="row">
+    <div><label for="window">Correlation window (minutes)</label><input type="text" id="window" name="window" placeholder="{{ default_window }}"></div>
+  </div>
+
+  <button type="submit">Correlate and Triage</button>
+  <span id="loading" hidden>Correlating and triaging…</span>
+</form>
+</main>
+<script>
+document.getElementById('add-row').addEventListener('click', () => {
+  const rows = document.getElementById('file-rows');
+  const clone = rows.firstElementChild.cloneNode(true);
+  clone.querySelectorAll('input,select').forEach(el => el.value = '');
+  rows.appendChild(clone);
+});
+document.getElementById('run-form').addEventListener('submit', () => document.getElementById('loading').hidden = false);
+</script>
+</body></html>
