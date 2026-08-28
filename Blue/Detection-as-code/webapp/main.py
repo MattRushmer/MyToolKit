@@ -10,11 +10,12 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from detection_forge.config import settings
+from detection_forge.export import VALID_TARGETS
 
 BASE_DIR = Path(__file__).resolve().parent
-VALID_TARGETS = {"sigma", "splunk", "elasticsearch", "wazuh"}
 app = FastAPI(title="Detection Forge")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -56,17 +57,32 @@ async def run(
     targets = [target for target in export_targets if target in VALID_TARGETS] or ["sigma"]
     with tempfile.TemporaryDirectory(prefix="detection-forge-") as tmp:
         log_paths: list[Path] = []
+        seen_names: set[str] = set()
         for upload in log_files:
             if not upload.filename or Path(upload.filename).suffix.lower() not in {".json", ".ndjson", ".jsonl"}:
                 continue
             safe_name = Path(upload.filename).name
+            # Disambiguate colliding basenames (e.g. two uploads both named
+            # "sample.json" from different source folders) so one write
+            # doesn't silently clobber the other and get double-counted.
+            if safe_name in seen_names:
+                stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+                index = 2
+                while f"{stem}_{index}{suffix}" in seen_names:
+                    index += 1
+                safe_name = f"{stem}_{index}{suffix}"
+            seen_names.add(safe_name)
             destination = Path(tmp) / safe_name
             with destination.open("wb") as handle:
                 shutil.copyfileobj(upload.file, handle)
             log_paths.append(destination)
         try:
             from detection_forge.pipeline import run_pipeline
-            result = run_pipeline(text, source_name=source_name, log_file_paths=log_paths, export_targets=targets)
+            # run_pipeline does a blocking LLM call plus CPU-bound parsing/backtesting;
+            # offload it so it doesn't stall the event loop for other requests (incl. /health).
+            result = await run_in_threadpool(
+                run_pipeline, text, source_name=source_name, log_file_paths=log_paths, export_targets=targets
+            )
         except Exception as exc:
             from detection_forge.llm.anthropic_client import LLMNotConfiguredError
             message = "ANTHROPIC_API_KEY is not configured. Set it as described in README.md, then restart the server." if isinstance(exc, LLMNotConfiguredError) else f"Pipeline stage failed: {exc}"

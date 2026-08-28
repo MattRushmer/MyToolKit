@@ -1,43 +1,51 @@
-"""Tolerant loaders for the JSON event samples used by the backtester."""
+"""Tolerant loaders for the JSON event samples used by the backtester.
+
+Diagnostics (parse errors, source line numbers) are returned directly from
+load_ndjson_logs() rather than stashed in module globals - this file is
+called from detection_forge.backtest.matcher.run_backtest(), which the web
+app now invokes concurrently across requests via starlette's threadpool
+(see webapp/main.py), so any shared mutable module state here would be a
+cross-request data race.
+"""
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
-# Kept at module scope so callers which need diagnostics can read it without
-# changing the small public return contract requested for load_ndjson_logs().
-last_parse_errors: list[str] = []
-last_record_line_numbers: list[int] = []
+@dataclass
+class ParsedLogFile:
+    records: list[dict[str, Any]] = field(default_factory=list)
+    parse_errors: list[str] = field(default_factory=list)
+    record_line_numbers: list[int] = field(default_factory=list)
 
 
-def load_ndjson_logs(path: Path) -> list[dict[str, Any]]:
+def load_ndjson_logs(path: Path) -> ParsedLogFile:
     """Load a JSON array or NDJSON file, retaining useful parse diagnostics."""
-    global last_parse_errors, last_record_line_numbers
-    last_parse_errors = []
-    last_record_line_numbers = []
+    result = ParsedLogFile()
     try:
         text = path.read_text(encoding="utf-8-sig")
     except Exception as exc:
-        last_parse_errors.append(f"line 0: unable to read file ({exc})")
-        return []
+        result.parse_errors.append(f"line 0: unable to read file ({exc})")
+        return result
     if not text.strip():
-        return []
+        return result
+
     try:
         parsed = json.loads(text)
         if isinstance(parsed, list):
-            records = []
             for number, value in enumerate(parsed, 1):
                 if isinstance(value, dict):
-                    records.append(value)
-                    last_record_line_numbers.append(number)
+                    result.records.append(value)
+                    result.record_line_numbers.append(number)
                 else:
-                    last_parse_errors.append(f"line {number}: JSON array item is not an object")
-            return records
+                    result.parse_errors.append(f"line {number}: JSON array item is not an object")
+            return result
     except json.JSONDecodeError:
-        pass
-    records = []
+        pass  # fall through to line-by-line NDJSON parsing
+
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
@@ -45,11 +53,11 @@ def load_ndjson_logs(path: Path) -> list[dict[str, Any]]:
             value = json.loads(line)
             if not isinstance(value, dict):
                 raise ValueError("JSON value is not an object")
-            records.append(value)
-            last_record_line_numbers.append(number)
+            result.records.append(value)
+            result.record_line_numbers.append(number)
         except Exception as exc:
-            last_parse_errors.append(f"line {number}: {str(exc).splitlines()[0]}")
-    return records
+            result.parse_errors.append(f"line {number}: {str(exc).splitlines()[0]}")
+    return result
 
 
 def flatten_record(record: dict[str, Any], sep: str = ".") -> dict[str, Any]:

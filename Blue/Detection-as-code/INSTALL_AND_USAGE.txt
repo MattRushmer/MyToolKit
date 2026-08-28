@@ -1,0 +1,192 @@
+================================================================================
+DETECTION FORGE - INSTALLATION AND USAGE GUIDE
+================================================================================
+
+WHAT THIS IS
+--------------------------------------------------------------------------------
+Detection Forge turns a CTI report or CVE writeup into a validated, tested
+Sigma detection rule:
+
+  1. Paste/upload a CTI report or CVE writeup (IOCs auto-extracted)
+  2. An LLM (Claude) drafts a Sigma rule, grounded on real example rules
+  3. The rule is structurally validated with pySigma (a real parser, not a
+     guess), and every MITRE ATT&CK tag is checked against a locally bundled,
+     offline copy of the real ATT&CK dataset - hallucinated technique IDs
+     are caught and flagged, not shipped
+  4. The rule is backtested against sample log files you supply (JSON/NDJSON)
+     so you can see exactly what would have fired
+  5. A transparent, explained 0-100 noise/false-positive score is computed
+  6. The validated rule is exported to Splunk SPL, Elasticsearch/Lucene,
+     native Sigma YAML, and a best-effort Wazuh XML rule
+
+It works as both a command-line tool and a local web app, from one shared
+Python codebase.
+
+================================================================================
+1. REQUIREMENTS
+================================================================================
+  - Python 3.10 or newer (developed and tested on Python 3.11)
+  - An Anthropic API key (only required for the "generate a new rule from
+    CTI text" step - everything else works without one, see section 5)
+  - Internet access for the one-time setup steps (installing packages,
+    downloading the MITRE ATT&CK dataset)
+
+================================================================================
+2. INSTALLATION
+================================================================================
+Open a terminal in this folder (Blue/Detection-as-code) and run:
+
+  Windows (PowerShell or Git Bash):
+  --------------------------------
+    python -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -e .
+
+  macOS / Linux:
+  --------------
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -e .
+
+The last command ("pip install -e .") registers the `detection-forge`
+command so you can run it directly instead of typing the full python path
+every time.
+
+If the MITRE ATT&CK dataset is not already present at
+data/enterprise-attack.json, download it with:
+
+    .venv\Scripts\python scripts\download_attack_data.py      (Windows)
+    .venv/bin/python scripts/download_attack_data.py           (macOS/Linux)
+
+This is a one-time ~50MB download and only needs to be re-run occasionally
+to pick up newly published ATT&CK techniques.
+
+================================================================================
+3. SET UP YOUR API KEY (only needed for generating NEW rules from CTI text)
+================================================================================
+  1. Get an Anthropic API key from https://console.anthropic.com/
+  2. Copy env.example to a new file named .env in this same folder
+  3. Open .env and set:
+         ANTHROPIC_API_KEY=sk-ant-your-real-key-here
+  4. Save the file. It is loaded automatically - no extra setup needed.
+
+Run this any time to confirm everything is configured correctly:
+
+    detection-forge check-setup
+
+It reports whether your API key, the ATT&CK dataset, and the Splunk/
+Elasticsearch export backends are all in place.
+
+================================================================================
+4. USING THE COMMAND LINE (CLI)
+================================================================================
+Full pipeline - generate, validate, backtest, score, and export a rule:
+
+    detection-forge run --cti-file path\to\report.txt --logs path\to\logs.ndjson --export sigma --export splunk --export wazuh --out-dir output
+
+Options:
+    --cti-file PATH     A text file containing the CTI report / CVE writeup
+    --cti-text "..."    Or pass the CTI text directly as a string instead
+    --logs PATH         A log file OR a directory of log files to backtest
+                         against (repeat --logs for multiple; accepts .json,
+                         .ndjson, .jsonl). Optional - skip it to generate a
+                         rule without backtesting.
+    --export TARGET     Repeatable. One or more of: sigma, splunk,
+                         elasticsearch, wazuh. Defaults to sigma only.
+    --out-dir PATH      Where exported rule files get written. Defaults to
+                         ./output. Files land at {out-dir}/{target}/{filename}
+
+You can also pipe CTI text in instead of using --cti-file:
+
+    type report.txt | detection-forge run --export sigma          (Windows)
+    cat report.txt | detection-forge run --export sigma            (macOS/Linux)
+
+Validate a rule you already have (no LLM call, no API key required):
+
+    detection-forge validate --rule-file path\to\rule.yml
+
+First-run diagnostics:
+
+    detection-forge check-setup
+
+================================================================================
+5. TRY IT WITHOUT AN API KEY FIRST
+================================================================================
+You do not need an API key to see the tool work. Three example Sigma rules
+and a matching sample log file are bundled specifically so you can see real,
+correct behavior end to end:
+
+    detection-forge validate --rule-file detection_forge\rules\examples\mshta_suspicious_execution.yml
+
+This validates the rule's structure and checks its ATT&CK tags against the
+real MITRE dataset - no LLM involved. The bundled sample CTI report
+(samples\sample_cti_report.txt) and sample log file
+(samples\sample_logs.ndjson) were hand-built together so that backtesting
+the three example rules against that log file produces real, verifiable
+matches (and one correctly-filtered-out benign event) - useful for seeing
+exactly how the backtest/noise-scoring engine behaves before you spend an
+API call on a real CTI report.
+
+================================================================================
+6. USING THE WEB APP
+================================================================================
+Start the local web server:
+
+    .venv\Scripts\python -m uvicorn webapp.main:app --reload        (Windows)
+    .venv/bin/python -m uvicorn webapp.main:app --reload              (macOS/Linux)
+
+Then open this address in your browser:
+
+    http://127.0.0.1:8000
+
+Paste or upload a CTI report, optionally upload sample log files and choose
+export targets, and submit. The results page shows:
+  - The full generated rule YAML (with a copy button)
+  - A pass/fail table for every ATT&CK tag
+  - Backtest results: events scanned, matches, and sample matched events
+  - The noise score with a plain-English breakdown of each contributing
+    factor
+  - Each requested export format, with warnings shown inline (e.g. the
+    Wazuh exporter always shows a warning to manually review field mappings)
+  - A clear "READY TO SHIP" / "NOT READY" banner at the top
+
+Press Ctrl+C in the terminal to stop the server when you're done.
+
+================================================================================
+7. RUNNING THE TEST SUITE (optional, for verifying your install)
+================================================================================
+    .venv\Scripts\python -m pytest tests -v        (Windows)
+    .venv/bin/python -m pytest tests -v              (macOS/Linux)
+
+All 12 tests should pass. None of them require an API key.
+
+================================================================================
+8. KNOWN LIMITATIONS
+================================================================================
+  - Wazuh export is best-effort. No official Sigma-to-Wazuh converter
+    exists anywhere, so this one is hand-built. It translates simple field
+    conditions but does NOT translate "and not" exclusion logic, and the
+    base rule ID (<if_sid>) is always a placeholder you must set yourself.
+    Every Wazuh export comes with an on-screen warning - always review it
+    before deploying to a real Wazuh instance.
+  - The noise score is a heuristic meant to focus your attention, not a
+    calibrated statistical guarantee. It's most useful when you supply a
+    realistic sample log set for backtesting.
+  - Backtesting covers the common Sigma condition grammar (and/or/not,
+    parentheses, "1 of x*", "all of them") but not every obscure Sigma
+    construct.
+
+================================================================================
+9. WHERE THINGS LIVE (for reference)
+================================================================================
+  detection_forge/     Core library (ingest, LLM generation, validation,
+                        backtest, scoring, export) - shared by both the CLI
+                        and the web app
+  cli/                 The command-line tool
+  webapp/               The FastAPI web app
+  tests/                Automated test suite
+  samples/              A hand-crafted CTI report + matching sample log file
+  data/                 The offline MITRE ATT&CK dataset
+  README.md             Fuller technical documentation
+  env.example            Template for your .env file
+================================================================================

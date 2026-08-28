@@ -13,12 +13,12 @@ from rich.table import Table
 
 from detection_forge.attack.attack_data import validate_attack_tags
 from detection_forge.config import ATTACK_STIX_PATH, settings
+from detection_forge.export import VALID_TARGETS
 from detection_forge.models import GeneratedRule, PipelineResult
 from detection_forge.rules.validator import apply_validation
 
 app = typer.Typer(help="Turn CTI into validated, testable detections.")
 console = Console()
-VALID_TARGETS = {"sigma", "splunk", "elasticsearch", "wazuh"}
 
 
 def _expand_logs(paths: list[Path]) -> list[Path]:
@@ -67,6 +67,12 @@ def render_result(result: PipelineResult) -> None:
             console.print(Panel(json.dumps(event.record, indent=2, default=str), title=f"Match at line {event.line_number} ({', '.join(event.matched_selection_names) or 'selection'})"))
         if backtest.unmapped_fields:
             console.print(f"[yellow]Unmapped fields: {', '.join(backtest.unmapped_fields)}[/yellow]")
+        if backtest.parse_errors:
+            console.print(Panel(
+                "\n".join(backtest.parse_errors),
+                title="[bold red]Backtest errors[/bold red] (results above may be incomplete)",
+                border_style="red",
+            ))
     else:
         console.print("[dim]No log files supplied; backtest was skipped.[/dim]")
     if result.noise:
@@ -83,6 +89,9 @@ def render_result(result: PipelineResult) -> None:
 
 def _write_exports(result: PipelineResult, out_dir: Path) -> None:
     for exported in result.exports:
+        if exported.target == "error" or not exported.filename:
+            console.print(f"[bold red]Export failed, nothing written:[/bold red] {'; '.join(exported.warnings) or 'unknown error'}")
+            continue
         path = out_dir / exported.target / exported.filename
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(exported.content, encoding="utf-8")

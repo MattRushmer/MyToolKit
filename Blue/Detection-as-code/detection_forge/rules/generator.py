@@ -56,5 +56,10 @@ def generate_rule(cti: CTIInput) -> GeneratedRule:
 
         repair_notes = "\n".join(f"- {e}" for e in generated.structural_errors)
 
-    assert last is not None
+    if last is None:
+        # settings.max_generation_retries is always >= 0, so range(...) always
+        # iterates at least once - this is unreachable, but `assert` is
+        # stripped under `python -O`, silently returning None despite the
+        # -> GeneratedRule annotation, so fail loudly instead.
+        raise RuntimeError("generate_rule produced no draft despite at least one generation attempt")
     return last
