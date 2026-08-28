@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
-from datetime import datetime
+import math
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,8 @@ def map_severity(raw: str, adapter: AdapterSpec) -> Severity:
     # CrowdStrike-style numeric severity (0-100): bucket it instead of failing the word lookup.
     try:
         numeric = float(raw)
+        if not math.isfinite(numeric) or not 0 <= numeric <= 100:
+            return Severity.MEDIUM
         if numeric >= 90:
             return Severity.CRITICAL
         if numeric >= 70:
@@ -62,7 +66,8 @@ def _parse_timestamp(raw: str) -> datetime:
         raise ValueError("empty timestamp")
     candidate = raw.replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(candidate)
+        parsed = datetime.fromisoformat(candidate)
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         pass
     for fmt in (
@@ -74,7 +79,7 @@ def _parse_timestamp(raw: str) -> datetime:
         "%Y-%m-%d",
     ):
         try:
-            return datetime.strptime(raw, fmt)
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     raise ValueError(f"unrecognized timestamp format: {raw!r}")
@@ -120,7 +125,11 @@ def load_alerts_from_csv(path: Path, client_id: str, source: str = "generic") ->
         text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
         raise IngestError(f"could not read {path}: {exc}") from exc
-    reader = csv.DictReader(text.splitlines())
+    # csv.DictReader(io.StringIO(...)), not text.splitlines(): splitlines() strips
+    # line terminators before the csv module sees them, so a quoted field that
+    # spans multiple physical lines (common in verbose EDR description columns)
+    # gets its embedded newline silently deleted instead of preserved.
+    reader = csv.DictReader(io.StringIO(text))
     alerts: list[Alert] = []
     warnings: list[str] = []
     for i, row in enumerate(reader, start=2):  # header is line 1
@@ -142,14 +151,24 @@ def load_alerts_from_json(path: Path, client_id: str, source: str = "generic") -
     stripped = text.strip()
     if not stripped:
         return [], []
+    warnings: list[str] = []
     if stripped.startswith("["):
         try:
             parsed = json.loads(stripped)
         except json.JSONDecodeError as exc:
             raise IngestError(f"{path}: invalid JSON array: {exc}") from exc
+        except (RecursionError, MemoryError) as exc:
+            # A pathologically deep/large JSON document (e.g. tens of thousands of
+            # nested arrays) - not malformed, just hostile input. Whole-file failure
+            # is still the right call here (we can't safely partially parse one
+            # top-level array), but this must not propagate as an unhandled 500.
+            raise IngestError(f"{path}: JSON document too large/deeply nested to parse: {exc}") from exc
         rows = [r for r in parsed if isinstance(r, dict)]
     else:
-        # NDJSON: one JSON object per line
+        # NDJSON: one JSON object per line. A malformed/truncated line is a
+        # per-row problem, not a whole-file one - per IngestError's own contract
+        # above, skip it with a warning instead of discarding every other
+        # (potentially valid) alert in the file.
         for i, line in enumerate(stripped.splitlines(), start=1):
             line = line.strip()
             if not line:
@@ -157,11 +176,11 @@ def load_alerts_from_json(path: Path, client_id: str, source: str = "generic") -
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise IngestError(f"{path}:{i}: invalid JSON: {exc}") from exc
+                warnings.append(f"{path.name}:{i}: skipped line: invalid JSON: {exc}")
+                continue
             if isinstance(obj, dict):
                 rows.append(obj)
     alerts: list[Alert] = []
-    warnings: list[str] = []
     for i, row in enumerate(rows, start=1):
         alert, warning = normalize_row(row, client_id, source, adapter)
         if warning:

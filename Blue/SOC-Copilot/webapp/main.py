@@ -49,6 +49,8 @@ async def run(
             status_code=400,
         )
 
+    if len(alert_files) != len(alert_sources):
+        return error("Each uploaded alert file must have exactly one source adapter.")
     uploaded = [(f, s) for f, s in zip(alert_files, alert_sources) if f and f.filename]
     if not uploaded:
         return error("Upload at least one alert export file.")
@@ -68,11 +70,11 @@ async def run(
 
     with tempfile.TemporaryDirectory(prefix="soc-copilot-") as tmp:
         specs: list[tuple[Path, str]] = []
-        for upload, source in uploaded:
+        for index, (upload, source) in enumerate(uploaded):
             suffix = Path(upload.filename).suffix.lower()
             if suffix not in _SUPPORTED_SUFFIXES:
                 continue
-            destination = Path(tmp) / Path(upload.filename).name
+            destination = Path(tmp) / f"{index}-{Path(upload.filename).name}"
             with destination.open("wb") as handle:
                 shutil.copyfileobj(upload.file, handle)
             specs.append((destination, source if source in ADAPTERS else "generic"))

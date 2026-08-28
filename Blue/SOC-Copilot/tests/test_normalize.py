@@ -83,7 +83,48 @@ def test_row_missing_timestamp_is_skipped_with_warning(tmp_path):
         ("", Severity.MEDIUM),
         ("95", Severity.CRITICAL),
         ("10", Severity.INFORMATIONAL),
+        ("NaN", Severity.MEDIUM),
+        ("101", Severity.MEDIUM),
     ],
 )
 def test_map_severity(raw, expected):
     assert map_severity(raw, get_adapter("generic")) == expected
+
+
+def test_timestamps_without_an_offset_are_normalized_to_utc(tmp_path):
+    path = tmp_path / "naive_timestamp.csv"
+    path.write_text("Timestamp,Title\n2026-01-01 09:00:00,Alert\n", encoding="utf-8")
+
+    alerts, warnings = load_alerts_from_csv(path, "client-a")
+
+    assert warnings == []
+    assert alerts[0].timestamp == datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
+
+
+def test_csv_field_with_embedded_newline_is_preserved(tmp_path):
+    path = tmp_path / "multiline.csv"
+    path.write_text(
+        'AlertId,Title,Description,Timestamp\n1,Alert One,"line one\nline two",2026-01-01T00:00:00Z\n',
+        encoding="utf-8",
+    )
+
+    alerts, warnings = load_alerts_from_csv(path, "client-a")
+
+    assert warnings == []
+    assert alerts[0].description == "line one\nline two"
+
+
+def test_malformed_ndjson_line_is_skipped_not_fatal(tmp_path):
+    path = tmp_path / "mixed.ndjson"
+    path.write_text(
+        '{"AlertId":"1","Title":"ok1","Timestamp":"2026-01-01T00:00:00Z"}\n'
+        "NOT VALID JSON\n"
+        '{"AlertId":"2","Title":"ok2","Timestamp":"2026-01-02T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+
+    alerts, warnings = load_alerts_from_json(path, "client-a")
+
+    assert len(alerts) == 2
+    assert len(warnings) == 1
+    assert "invalid JSON" in warnings[0]

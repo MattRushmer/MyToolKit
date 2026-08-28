@@ -1,6 +1,7 @@
 """Rich terminal interface for SOC Copilot."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
@@ -23,10 +24,16 @@ _PRIORITY_STYLE = {"P1": "bold red", "P2": "orange3", "P3": "yellow", "P4": "dim
 
 
 def _parse_alert_specs(alerts: list[str]) -> list[tuple[Path, str]]:
+    """Parse "path[:source]" entries. Splits the Windows drive letter (if any)
+    off first so a bare absolute path like "C:\\alerts.csv" (no explicit
+    source) isn't misread as path="C" source="\\alerts.csv" - only a colon
+    *after* the drive prefix is treated as the path/source separator."""
     specs: list[tuple[Path, str]] = []
     for entry in alerts:
-        if ":" in entry:
-            path_part, source = entry.rsplit(":", 1)
+        drive, rest = os.path.splitdrive(entry)
+        if ":" in rest:
+            path_part, source = rest.rsplit(":", 1)
+            path_part = drive + path_part
         else:
             path_part, source = entry, "generic"
         path = Path(path_part)
@@ -87,7 +94,7 @@ def run(
     client_name: str = typer.Option(..., "--client-name"),
     tier: str = typer.Option("standard", "--tier", help="standard | high | crown_jewel"),
     alerts: list[str] = typer.Option(..., "--alerts", help="path[:source] — source is one of: " + ", ".join(sorted(ADAPTERS)) + " (default generic). Repeatable."),
-    window: int = typer.Option(None, "--window", help="Correlation window in minutes (default from config)."),
+    window: int | None = typer.Option(None, "--window", help="Correlation window in minutes (default from config)."),
     out_dir: Path = typer.Option(Path("output"), "--out-dir"),
     period_label: str = typer.Option("This period", "--period-label"),
 ) -> None:

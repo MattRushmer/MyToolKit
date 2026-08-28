@@ -33,6 +33,27 @@ def triage_incident(incident: Incident, client: Client) -> tuple[TriageResult, U
     try:
         prompt = build_triage_prompt(incident, client)
         draft = draft_triage(prompt)
+        techniques = []
+        for tid in draft.attack_techniques:
+            recognized, name = lookup(tid)
+            techniques.append(AttackTechniqueTag(technique_id=tid, technique_name=name, recognized=recognized))
+
+        result = TriageResult(
+            incident_id=incident.incident_id,
+            verdict=Verdict(draft.verdict),
+            confidence=max(0, min(100, draft.confidence)),
+            severity=Severity(draft.severity),
+            suggested_priority=Priority(draft.suggested_priority),
+            summary=draft.summary,
+            analyst_notes=draft.analyst_notes,
+            attack_techniques=techniques,
+            is_llm_generated=True,
+            model_used=draft.model_used,
+            generation_notes=draft.tailored_recommendation,
+            raw_llm_response=draft.raw_response,
+        )
+        usage = UsageCost(input_tokens=draft.input_tokens, output_tokens=draft.output_tokens)
+        return result, usage
     except LLMNotConfiguredError:
         return heuristic_triage(incident), UsageCost()
     except Exception as exc:
@@ -43,25 +64,3 @@ def triage_incident(incident: Incident, client: Client) -> tuple[TriageResult, U
             + fallback.analyst_notes
         )
         return fallback, UsageCost()
-
-    techniques = []
-    for tid in draft.attack_techniques:
-        recognized, name = lookup(tid)
-        techniques.append(AttackTechniqueTag(technique_id=tid, technique_name=name, recognized=recognized))
-
-    result = TriageResult(
-        incident_id=incident.incident_id,
-        verdict=Verdict(draft.verdict),
-        confidence=max(0, min(100, draft.confidence)),
-        severity=Severity(draft.severity),
-        suggested_priority=Priority(draft.suggested_priority),
-        summary=draft.summary,
-        analyst_notes=draft.analyst_notes,
-        attack_techniques=techniques,
-        is_llm_generated=True,
-        model_used=draft.model_used,
-        generation_notes=draft.tailored_recommendation,
-        raw_llm_response=draft.raw_response,
-    )
-    usage = UsageCost(input_tokens=draft.input_tokens, output_tokens=draft.output_tokens)
-    return result, usage
