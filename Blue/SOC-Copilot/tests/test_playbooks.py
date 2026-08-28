@@ -27,6 +27,17 @@ def test_classify_falls_back_to_generic():
     assert classify_category(_incident("Something unrelated happened")) == "generic"
 
 
+def test_routine_disk_encryption_is_not_misclassified_as_ransomware():
+    """A bare "encrypt" substring used to match BitLocker/TLS/DB-encryption
+    alerts as ransomware - narrowed to specific phrases like "encrypted files"."""
+    assert classify_category(_incident("BitLocker encryption enabled", "Drive encryption policy applied")) == "generic"
+    assert classify_category(_incident("TLS encryption negotiation failed")) == "generic"
+
+
+def test_actual_ransomware_encryption_activity_still_classifies_correctly():
+    assert classify_category(_incident("Mass file encryption detected", "Files encrypted with .locked extension")) == "ransomware"
+
+
 def test_every_playbook_has_all_four_phases():
     for name, playbook in PLAYBOOKS.items():
         for phase in ("contain", "eradicate", "recover", "communicate"):

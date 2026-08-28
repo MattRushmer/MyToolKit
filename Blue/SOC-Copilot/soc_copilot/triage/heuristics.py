@@ -26,7 +26,10 @@ _SEVERITY_BASE_SCORE = {
 _KEYWORD_TECHNIQUES = [
     ("ransomware", "T1486"),
     ("canary", "T1486"),
-    ("encrypt", "T1486"),
+    ("encrypted files", "T1486"),
+    ("files encrypted", "T1486"),
+    ("encrypting files", "T1486"),
+    ("encryption ransom", "T1486"),
     ("lsass", "T1003.001"),
     ("credential dump", "T1003.001"),
     ("mimikatz", "T1003.001"),
@@ -79,6 +82,9 @@ def _score_to_priority(score: float) -> Priority:
     return Priority.P4
 
 
+_HIGH_CONFIDENCE_FLOOR = 75.0  # guarantees at least HIGH severity + P1 priority (both bucket at >=60)
+
+
 def pre_score(incident: Incident) -> float:
     """0-100 heuristic priority score, used both as the no-LLM-key fallback
     severity and to order the queue before/without an LLM verdict."""
@@ -90,7 +96,13 @@ def pre_score(incident: Incident) -> float:
         score += 10
     text = _incident_text(incident)
     if any(kw in text for kw in _HIGH_CONFIDENCE_KEYWORDS):
-        score += 15
+        # A simple +15 additive bonus couldn't lift a low-vendor-severity
+        # incident (e.g. INFORMATIONAL base = 5) past MEDIUM even when the
+        # text contains "mimikatz"/"lsass"/etc - keywords that are rarely
+        # benign regardless of what severity the source tool assigned. Force
+        # a floor instead of just adding, so the "push the score up hard"
+        # intent actually holds.
+        score = max(score + 15, _HIGH_CONFIDENCE_FLOOR)
     return min(score, 100.0)
 
 

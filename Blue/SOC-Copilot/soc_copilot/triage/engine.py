@@ -33,6 +33,24 @@ def triage_incident(incident: Incident, client: Client) -> tuple[TriageResult, U
     try:
         prompt = build_triage_prompt(incident, client)
         draft = draft_triage(prompt)
+    except LLMNotConfiguredError:
+        return heuristic_triage(incident), UsageCost()
+    except Exception as exc:
+        # The API call itself never completed, so nothing was billed - usage
+        # stays at zero.
+        fallback = heuristic_triage(incident)
+        fallback.analyst_notes = (
+            f"LLM triage failed ({exc}); falling back to heuristic scoring below. "
+            "Treat this incident as needing manual review regardless of the heuristic verdict.\n\n"
+            + fallback.analyst_notes
+        )
+        return fallback, UsageCost()
+
+    # The API call succeeded and was billed - capture that usage now, before
+    # any post-hoc validation, so a malformed-but-billed response still gets
+    # counted in cost tracking even if we fall back below.
+    usage = UsageCost(input_tokens=draft.input_tokens, output_tokens=draft.output_tokens)
+    try:
         techniques = []
         for tid in draft.attack_techniques:
             recognized, name = lookup(tid)
@@ -52,15 +70,16 @@ def triage_incident(incident: Incident, client: Client) -> tuple[TriageResult, U
             generation_notes=draft.tailored_recommendation,
             raw_llm_response=draft.raw_response,
         )
-        usage = UsageCost(input_tokens=draft.input_tokens, output_tokens=draft.output_tokens)
         return result, usage
-    except LLMNotConfiguredError:
-        return heuristic_triage(incident), UsageCost()
-    except Exception as exc:
+    except (ValueError, KeyError) as exc:
+        # The model returned something outside the tool schema's enum values
+        # (shouldn't happen with tool_choice forcing the schema, but nothing
+        # guarantees it) - degrade to heuristic, but keep the real usage since
+        # the call was still billed.
         fallback = heuristic_triage(incident)
         fallback.analyst_notes = (
-            f"LLM triage failed ({exc}); falling back to heuristic scoring below. "
-            "Treat this incident as needing manual review regardless of the heuristic verdict.\n\n"
-            + fallback.analyst_notes
+            f"LLM returned a malformed triage draft ({exc}); falling back to heuristic scoring "
+            "below. The API call still counted against usage/cost tracking. Treat this incident "
+            "as needing manual review regardless of the heuristic verdict.\n\n" + fallback.analyst_notes
         )
-        return fallback, UsageCost()
+        return fallback, usage
