@@ -20,8 +20,8 @@ from soc_copilot.models import (
     Alert,
     Client,
     IncidentResult,
-    Priority,
     PipelineResult,
+    Priority,
     Recommendation,
     Severity,
     TriageResult,
@@ -73,8 +73,20 @@ def run_pipeline(
                 analyst_notes=f"Automated processing failed unexpectedly ({exc}). Review the raw alerts below manually.",
             )
             recommendation = Recommendation(playbook_name="Manual Review Required", matched_category="error")
-            ticket = render_ticket_note(incident, triage, recommendation, client, UsageCost())
             usage = UsageCost()
+            try:
+                ticket = render_ticket_note(incident, triage, recommendation, client, usage)
+            except Exception as render_exc:
+                # This fallback path must not itself be able to raise - if it
+                # did, the exception would propagate out of the loop and take
+                # every remaining incident in the batch down with it, which is
+                # exactly what this try/except exists to prevent.
+                ticket = (
+                    f"# Manual review required - {incident.incident_id}\n\n"
+                    f"Automated ticket rendering also failed ({render_exc}) after the original "
+                    f"processing failure ({exc}). Alerts in this incident: "
+                    + ", ".join(f"{a.source}:{a.alert_id}" for a in incident.alerts)
+                )
         incident_results.append(
             IncidentResult(incident=incident, triage=triage, recommendation=recommendation, ticket_note_markdown=ticket, usage=usage)
         )

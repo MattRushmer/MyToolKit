@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -30,16 +30,22 @@ _load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
-    anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
-    anthropic_model: str = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+    # default_factory, not a bare `= os.environ.get(...)`: a plain dataclass
+    # field default is evaluated once when this class body executes (at first
+    # import of this module), not per-instantiation - a bare default would
+    # freeze every Settings() ever constructed to whatever the environment
+    # was at first import, silently ignoring a later os.environ change (e.g.
+    # a test doing monkeypatch.setenv(...) then Settings()).
+    anthropic_api_key: str | None = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY"))
+    anthropic_model: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"))
 
     # Alerts on the same client+host (or client+user) within this many minutes
     # of each other are grouped into one incident.
-    correlation_window_minutes: int = int(os.environ.get("SOC_CORRELATION_WINDOW_MIN", "60"))
+    correlation_window_minutes: int = field(default_factory=lambda: int(os.environ.get("SOC_CORRELATION_WINDOW_MIN", "60")))
 
     # List-price defaults for the cost tracker; override per your model/contract.
-    cost_per_1m_input: float = float(os.environ.get("SOC_COST_PER_1M_INPUT", "3.00"))
-    cost_per_1m_output: float = float(os.environ.get("SOC_COST_PER_1M_OUTPUT", "15.00"))
+    cost_per_1m_input: float = field(default_factory=lambda: float(os.environ.get("SOC_COST_PER_1M_INPUT", "3.00")))
+    cost_per_1m_output: float = field(default_factory=lambda: float(os.environ.get("SOC_COST_PER_1M_OUTPUT", "15.00")))
 
     @property
     def has_llm_key(self) -> bool:

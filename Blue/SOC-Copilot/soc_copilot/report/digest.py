@@ -8,6 +8,14 @@ from soc_copilot.models import PipelineResult
 _PRIORITY_ORDER = ("P1", "P2", "P3", "P4")
 
 
+def _escape_cell(text: str) -> str:
+    """Alert titles/summaries are free text pulled from an uploaded export (or
+    an LLM) and can legitimately contain a literal "|" (e.g. a process-chain
+    title like "explorer.exe | powershell.exe"), which would otherwise break
+    this table's column alignment when rendered."""
+    return text.replace("|", "\\|")
+
+
 def render_client_digest(result: PipelineResult, period_label: str = "This period") -> str:
     client = result.client
     lines: list[str] = []
@@ -26,10 +34,10 @@ def render_client_digest(result: PipelineResult, period_label: str = "This perio
     lines.append("|---|---|---|---|---|")
     ordered = sorted(result.incidents, key=lambda r: (_PRIORITY_ORDER.index(r.triage.suggested_priority.value), r.incident.opened_at))
     for r in ordered:
-        target = r.incident.host or r.incident.user or "(unknown)"
+        target = _escape_cell(r.incident.host or r.incident.user or "(unknown)")
         lines.append(
             f"| {r.triage.suggested_priority.value} | {r.triage.severity.value} | {target} | "
-            f"{r.triage.verdict.value} | {r.triage.summary} |"
+            f"{r.triage.verdict.value} | {_escape_cell(r.triage.summary)} |"
         )
     lines.append("")
     lines.append(f"_Estimated AI triage cost this period: ${result.total_cost_usd:.4f}_")

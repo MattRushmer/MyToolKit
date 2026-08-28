@@ -6,7 +6,7 @@ writes these types so the CLI and web app can share one core pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -150,7 +150,10 @@ class PipelineResult:
     client: Client
     incidents: list[IncidentResult] = field(default_factory=list)
     total_alerts_ingested: int = 0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    # datetime.utcnow() returns a naive datetime and is deprecated since 3.12;
+    # this also keeps created_at consistent with Alert.timestamp, which is
+    # always UTC-aware (see ingest/normalize.py's _parse_timestamp).
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
     def total_cost_usd(self) -> float:

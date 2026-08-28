@@ -20,6 +20,13 @@ from typing import Any
 from soc_copilot.ingest.adapters import AdapterSpec, get_adapter
 from soc_copilot.models import Alert, Severity
 
+# Python's csv module defaults to a 128KB field-size limit, low enough that a
+# single verbose (but entirely legitimate) EDR description field can exceed
+# it and raise csv.Error mid-parse. Raised here, process-wide, to a value
+# still well under the app's whole-file upload cap (webapp/main.py's
+# _MAX_UPLOAD_BYTES), so a hostile single field can't grow unbounded either.
+csv.field_size_limit(10 * 1024 * 1024)
+
 
 class IngestError(Exception):
     """Raised for a whole-file problem (unreadable, unparseable). Per-row problems are skipped with a warning instead."""
@@ -132,7 +139,19 @@ def load_alerts_from_csv(path: Path, client_id: str, source: str = "generic") ->
     reader = csv.DictReader(io.StringIO(text))
     alerts: list[Alert] = []
     warnings: list[str] = []
-    for i, row in enumerate(reader, start=2):  # header is line 1
+    row_iterator = enumerate(reader, start=2)  # header is line 1
+    while True:
+        try:
+            i, row = next(row_iterator)
+        except StopIteration:
+            break
+        except csv.Error as exc:
+            # Malformed CSV structure (e.g. a field beyond even the raised
+            # field_size_limit above, or an embedded NUL byte) - skip past it
+            # rather than letting the whole file fail; the reader can keep
+            # advancing since the underlying StringIO still has more input.
+            warnings.append(f"{path.name}: skipped malformed row: {exc}")
+            continue
         alert, warning = normalize_row(row, client_id, source, adapter)
         if warning:
             warnings.append(f"{path.name}:{i}: {warning}")
@@ -177,6 +196,13 @@ def load_alerts_from_json(path: Path, client_id: str, source: str = "generic") -
                 obj = json.loads(line)
             except json.JSONDecodeError as exc:
                 warnings.append(f"{path.name}:{i}: skipped line: invalid JSON: {exc}")
+                continue
+            except (RecursionError, MemoryError) as exc:
+                # Same hostile-input guard as the JSON-array branch above -
+                # a single pathologically nested line is a per-row problem,
+                # not a whole-file one, so skip it rather than letting the
+                # exception propagate as an unhandled 500.
+                warnings.append(f"{path.name}:{i}: skipped line: too large/deeply nested to parse: {exc}")
                 continue
             if isinstance(obj, dict):
                 rows.append(obj)

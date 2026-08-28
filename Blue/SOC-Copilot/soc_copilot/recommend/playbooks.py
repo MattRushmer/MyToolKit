@@ -14,7 +14,19 @@ from soc_copilot.models import Incident, Recommendation, TriageResult
 
 # Ordered: first matching category wins, so put more specific/severe patterns first.
 _CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
-    ("ransomware", ["ransomware", "canary", "encrypt", "inhibit system recovery", "shadow copy"]),
+    (
+        "ransomware",
+        [
+            "ransomware",
+            "canary",
+            "encrypted files",
+            "files encrypted",
+            "encrypting files",
+            "encryption ransom",
+            "inhibit system recovery",
+            "shadow copy",
+        ],
+    ),
     ("credential_access", ["lsass", "mimikatz", "procdump", "credential dump", "password spray", "brute force"]),
     ("phishing", ["phishing", "macro", "spearphish", "malicious attachment", "malicious link"]),
     ("suspicious_login", ["impossible travel", "sign-in", "signin", "mfa", "new device login", "unfamiliar location"]),
