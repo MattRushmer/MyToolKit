@@ -71,11 +71,10 @@ def triage_incident(incident: Incident, client: Client) -> tuple[TriageResult, U
             raw_llm_response=draft.raw_response,
         )
         return result, usage
-    except (ValueError, KeyError) as exc:
-        # The model returned something outside the tool schema's enum values
-        # (shouldn't happen with tool_choice forcing the schema, but nothing
-        # guarantees it) - degrade to heuristic, but keep the real usage since
-        # the call was still billed.
+    except Exception as exc:
+        # The model returned a malformed draft field (for example an invalid
+        # enum, a missing attribute, or a non-numeric confidence). Degrade to
+        # heuristic, but keep the real usage since the call was still billed.
         fallback = heuristic_triage(incident)
         fallback.analyst_notes = (
             f"LLM returned a malformed triage draft ({exc}); falling back to heuristic scoring "
