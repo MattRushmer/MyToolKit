@@ -115,6 +115,8 @@ python -m venv .venv
 
 cp env.example .env
 # ANTHROPIC_API_KEY is optional - only used for the active-probe LLM judge.
+# See API_KEYS.md for the full picture, including why some sample/test
+# files contain key-looking strings that are deliberately fake.
 ```
 
 ## CLI usage

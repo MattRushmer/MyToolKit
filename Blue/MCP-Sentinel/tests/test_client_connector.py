@@ -78,10 +78,10 @@ def test_scrub_secrets_replaces_real_value_with_redacted_counterpart():
         command="python",
         args=("server.py", "--api-key", "<redacted-by-mcp-sentinel>"),
     )
-    real_args = ["server.py", "--api-key", "sk_live_realsecret1234567890"]
-    message = "OSError: failed to spawn: server.py --api-key sk_live_realsecret1234567890"
+    real_args = ["server.py", "--api-key", "NOT-A-REAL-KEY-mcp-sentinel-test-fixture"]
+    message = "OSError: failed to spawn: server.py --api-key NOT-A-REAL-KEY-mcp-sentinel-test-fixture"
     scrubbed = _scrub_secrets(message, config, real_args, None)
-    assert "sk_live_realsecret1234567890" not in scrubbed
+    assert "NOT-A-REAL-KEY-mcp-sentinel-test-fixture" not in scrubbed
     assert "<redacted-by-mcp-sentinel>" in scrubbed
 
 

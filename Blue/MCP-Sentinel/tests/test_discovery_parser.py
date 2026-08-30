@@ -31,12 +31,12 @@ def test_parses_stdio_mcpservers_shape():
 
 
 def test_secret_flag_and_following_value_are_redacted_in_args():
-    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "sk_live_51H8x9zK2example"]}}}
+    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "NOT-A-REAL-KEY-mcp-sentinel-test-fixture"]}}}
     servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
     s = servers[0]
     assert s.args == ("sync.py", "--api-key", "<redacted-by-mcp-sentinel>")
     assert s.secret_like_arg_flags == ("--api-key",)
-    assert "sk_live_51H8x9zK2example" not in repr(s)
+    assert "NOT-A-REAL-KEY-mcp-sentinel-test-fixture" not in repr(s)
 
 
 def test_bearer_flag_is_recognized_as_secret_like():
@@ -55,20 +55,20 @@ def test_inline_flag_equals_value_form_is_redacted():
     # so the code took the "it's a flag name" branch and appended the WHOLE
     # "--api-key=<secret>" string (secret included) as the "flag name",
     # leaving the actual secret value untouched in `args` too.
-    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key=sk_live_51H8x9zK2example"]}}}
+    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key=NOT-A-REAL-KEY-mcp-sentinel-test-fixture"]}}}
     servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
     s = servers[0]
     assert s.args == ("sync.py", "--api-key=<redacted-by-mcp-sentinel>")
     assert s.secret_like_arg_flags == ("--api-key",)
-    assert "sk_live_51H8x9zK2example" not in repr(s)
+    assert "NOT-A-REAL-KEY-mcp-sentinel-test-fixture" not in repr(s)
 
 
 def test_bare_opaque_looking_value_is_redacted_even_without_a_flag():
-    data = {"mcpServers": {"srv": {"command": "python", "args": ["server.py", "AKIAIOSFODNN7EXAMPLEAKIA1234567890"]}}}
+    data = {"mcpServers": {"srv": {"command": "python", "args": ["server.py", "NOT-A-REAL-KEY-mcp-sentinel-bare-opaque-fixture"]}}}
     servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
     s = servers[0]
     assert s.args == ("server.py", "<redacted-by-mcp-sentinel>")
-    assert "AKIAIOSFODNN7EXAMPLEAKIA1234567890" not in repr(s)
+    assert "NOT-A-REAL-KEY-mcp-sentinel-bare-opaque-fixture" not in repr(s)
 
 
 def test_short_benign_args_are_not_redacted():
@@ -96,11 +96,11 @@ def test_url_without_secret_query_param_is_unchanged():
 def test_extract_raw_entries_still_returns_unredacted_secret_for_live_connection(tmp_path):
     path = tmp_path / "secret.json"
     path.write_text(
-        json.dumps({"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "sk_live_real_secret_value"]}}}),
+        json.dumps({"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "NOT-A-REAL-KEY-mcp-sentinel-raw-entry-fixture"]}}}),
         encoding="utf-8",
     )
     raw = extract_raw_entries(ConfigLocation("cline", path))
-    assert raw["crm"]["args"] == ["sync.py", "--api-key", "sk_live_real_secret_value"]
+    assert raw["crm"]["args"] == ["sync.py", "--api-key", "NOT-A-REAL-KEY-mcp-sentinel-raw-entry-fixture"]
 
 
 def test_parses_remote_http_shape_with_auth_header():

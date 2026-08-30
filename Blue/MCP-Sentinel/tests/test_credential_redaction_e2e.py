@@ -1,9 +1,13 @@
 """End-to-end regression test for the CRITICAL finding from the security
-review: real credential values embedded in a server's stdio launch args or
-HTTP url query string must never reach a serialized report, even though the
-scanner needs those same real values to actually connect. Drives the real
-engine against the real fixture server (extra args are harmless - the
-fixture server doesn't parse argv) and inspects the actual JSON report text.
+review: credential values embedded in a server's stdio launch args or HTTP
+url query string must never reach a serialized report, even though the
+scanner needs those same values to actually connect. Drives the real engine
+against the real fixture server (extra args are harmless - the fixture
+server doesn't parse argv) and inspects the actual JSON report text.
+
+FAKE_SECRET below is a synthetic, non-vendor-shaped placeholder (no `sk_live_`/
+`AKIA`/etc. prefix) - deliberately, so it can never be mistaken for a real
+credential by a human skimming a diff or by an automated secret scanner.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ from mcp_sentinel.engine import ScanOptions, run_scan
 from mcp_sentinel.report.json_report import report_to_json
 from test_client_connector import FIXTURE_SERVER
 
-REAL_SECRET = "sk_live_51H8x9zK2REALSECRETVALUE9999"
+FAKE_SECRET = "NOT-A-REAL-KEY-mcp-sentinel-fake-secret-for-tests-only"
 
 
 def _write_config_with_secret_arg(tmp_path):
@@ -25,7 +29,7 @@ def _write_config_with_secret_arg(tmp_path):
                 "mcpServers": {
                     "vulnerable-demo": {
                         "command": sys.executable,
-                        "args": [str(FIXTURE_SERVER), "--api-key", REAL_SECRET],
+                        "args": [str(FIXTURE_SERVER), "--api-key", FAKE_SECRET],
                     }
                 }
             }
@@ -35,7 +39,7 @@ def _write_config_with_secret_arg(tmp_path):
     return config_path
 
 
-async def test_real_secret_in_stdio_args_never_reaches_json_report(tmp_path):
+async def test_fake_secret_in_stdio_args_never_reaches_json_report(tmp_path):
     from mcp_sentinel.discovery.config_locations import ConfigLocation
 
     config_path = _write_config_with_secret_arg(tmp_path)
@@ -51,7 +55,7 @@ async def test_real_secret_in_stdio_args_never_reaches_json_report(tmp_path):
     assert report.total_tools == 5
 
     report_json = report_to_json(report)
-    assert REAL_SECRET not in report_json
+    assert FAKE_SECRET not in report_json
 
     # The rule this config is meant to trip must still fire (redaction must
     # not silently swallow the finding along with the secret).
@@ -67,7 +71,7 @@ async def test_inline_flag_equals_secret_never_reaches_json_report(tmp_path):
 
     config_path = tmp_path / "mcp.json"
     config_path.write_text(
-        json.dumps({"mcpServers": {"vulnerable-demo": {"command": sys.executable, "args": [str(FIXTURE_SERVER), f"--api-key={REAL_SECRET}"]}}}),
+        json.dumps({"mcpServers": {"vulnerable-demo": {"command": sys.executable, "args": [str(FIXTURE_SERVER), f"--api-key={FAKE_SECRET}"]}}}),
         encoding="utf-8",
     )
     options = ScanOptions(active_probes=False, check_drift=False, timeout_seconds=20)
@@ -75,12 +79,12 @@ async def test_inline_flag_equals_secret_never_reaches_json_report(tmp_path):
 
     assert report.inventories[0].reachable, report.inventories[0].connection_error
     report_json = report_to_json(report)
-    assert REAL_SECRET not in report_json
+    assert FAKE_SECRET not in report_json
     data = json.loads(report_json)
     assert any(f["finding_id"].startswith("auth-secret-in-args:") for f in data["findings"])
 
 
-async def test_real_secret_in_url_query_param_never_reaches_json_report(tmp_path):
+async def test_fake_secret_in_url_query_param_never_reaches_json_report(tmp_path):
     # Points at a closed localhost port (immediate, fast ConnectionRefusedError)
     # rather than a real external domain: a round-2 review found the original
     # version of this test made a genuine outbound DNS/TCP/TLS attempt to
@@ -91,11 +95,11 @@ async def test_real_secret_in_url_query_param_never_reaches_json_report(tmp_path
 
     config_path = tmp_path / "mcp.json"
     config_path.write_text(
-        json.dumps({"mcpServers": {"billing": {"url": f"http://127.0.0.1:1/mcp?token={REAL_SECRET}", "type": "http"}}}),
+        json.dumps({"mcpServers": {"billing": {"url": f"http://127.0.0.1:1/mcp?token={FAKE_SECRET}", "type": "http"}}}),
         encoding="utf-8",
     )
     options = ScanOptions(active_probes=False, check_drift=False, timeout_seconds=5)
     report, _ = await run_scan([ConfigLocation("test-harness", config_path)], options)
 
     report_json = report_to_json(report)
-    assert REAL_SECRET not in report_json
+    assert FAKE_SECRET not in report_json
