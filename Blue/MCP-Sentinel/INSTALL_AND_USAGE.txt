@@ -1,0 +1,81 @@
+================================================================================
+MCP SENTINEL - INSTALLATION AND USAGE GUIDE
+================================================================================
+
+WHAT THIS IS
+--------------------------------------------------------------------------------
+MCP Sentinel is an attack-surface scanner for MCP (Model Context Protocol)
+servers and agent tool-grants:
+
+  1. Discover every MCP server declared across an org's agent hosts (Claude
+     Desktop, Claude Code, Cursor, Windsurf, Cline, VS Code)
+  2. Connect to each one for real and inventory its tools/resources/prompts
+  3. Flag over-privileged tools, unauthenticated transports, and tool
+     poisoning via static rules citing real OWASP MCP Top 10 (2025) IDs
+  4. Optionally, actively invoke read-only tools and scan their real
+     responses for prompt injection - not just what the tool claims about
+     itself
+  5. Detect rug-pull / config drift against a saved baseline from the
+     previous scan
+  6. Export a Rich terminal summary, JSON, and/or Markdown report
+
+================================================================================
+1. REQUIREMENTS
+================================================================================
+  - Python 3.10 or newer (developed and tested on Python 3.11)
+  - An Anthropic API key (optional - only used for the active-probe LLM
+    judge; heuristic detection works fully without one)
+  - Internet access for the one-time setup step (installing packages)
+
+================================================================================
+2. INSTALLATION
+================================================================================
+Open a terminal in this folder (Blue/MCP-Sentinel) and run:
+
+  Windows (PowerShell or Git Bash):
+  --------------------------------
+    python -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -e .
+
+  macOS/Linux:
+  --------------------------------
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -e .
+
+Then, optionally:
+
+    cp env.example .env
+    # edit .env and set ANTHROPIC_API_KEY=sk-ant-... if you want the LLM judge
+
+================================================================================
+3. USAGE
+================================================================================
+Activate the virtualenv, then:
+
+    mcp-sentinel check-setup
+    mcp-sentinel list-configs
+    mcp-sentinel scan
+    mcp-sentinel scan --active --out-json report.json --out-markdown report.md
+    mcp-sentinel scan --fail-on high      (exit code 2 if any HIGH+ finding)
+
+================================================================================
+4. TRY IT WITHOUT A REAL SERVER
+================================================================================
+fixtures/vulnerable_mcp_server/ is a real MCP server with five tools, each
+planting exactly one issue the scanner is built to catch. From the project
+root, with the virtualenv activated:
+
+    mcp-sentinel scan --config fixtures/vulnerable_mcp_server/demo.mcp.json --active --no-drift
+
+Never grant this server to a real agent host.
+
+================================================================================
+5. RUNNING TESTS
+================================================================================
+    .venv\Scripts\python -m pytest          (Windows)
+    .venv/bin/python -m pytest              (macOS/Linux)
+
+Most tests are real integration tests against fixtures/vulnerable_mcp_server
+over real stdio - no mocked MCP protocol calls.

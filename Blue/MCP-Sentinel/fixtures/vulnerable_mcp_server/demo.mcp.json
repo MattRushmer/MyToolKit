@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vulnerable-demo": {
+      "command": "python",
+      "args": ["fixtures/vulnerable_mcp_server/server.py"]
+    }
+  }
+}

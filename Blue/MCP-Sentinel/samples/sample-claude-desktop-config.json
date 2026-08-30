@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/demo/Documents"]
+    },
+    "internal-ops-api": {
+      "url": "http://10.0.4.12:8787/mcp",
+      "type": "http"
+    }
+  }
+}

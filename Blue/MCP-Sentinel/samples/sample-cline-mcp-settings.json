@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "devops-agent": {
+      "command": "node",
+      "args": ["./devops-mcp-server/dist/index.js"],
+      "autoApprove": ["run_shell_command", "restart_service"],
+      "disabled": false
+    },
+    "legacy-crm-sync": {
+      "command": "python",
+      "args": ["crm_sync_server.py", "--api-key", "sk_live_51H8x9zK2example"],
+      "disabled": false
+    }
+  }
+}
