@@ -120,6 +120,27 @@ def load_config_file(location: ConfigLocation) -> tuple[list[MCPServerConfig], l
     return parse_config_dict(location.host_app, location.schema, data, str(location.path))
 
 
+def extract_raw_entries(location: ConfigLocation) -> dict[str, dict[str, Any]]:
+    """Re-read a config file's per-server entries verbatim (including secret
+    values), keyed by config_name. Used only transiently, by the live client
+    connector, to authenticate a real introspection connection - callers must
+    not persist the return value. MCPServerConfig (from load_config_file)
+    never carries these values, only their names/presence, so a ScanReport
+    or baseline file can never leak a credential even if serialized to disk.
+    """
+    try:
+        data = json.loads(location.path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    top_level_key = "servers" if location.schema == "servers" else "mcpServers"
+    raw_servers = data.get(top_level_key)
+    if not isinstance(raw_servers, dict):
+        return {}
+    return {str(name): entry for name, entry in raw_servers.items() if isinstance(entry, dict)}
+
+
 def load_config_files(locations: list[ConfigLocation]) -> tuple[list[MCPServerConfig], list[str]]:
     all_servers: list[MCPServerConfig] = []
     all_warnings: list[str] = []

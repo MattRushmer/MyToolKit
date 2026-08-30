@@ -3,7 +3,7 @@ import json
 import pytest
 
 from mcp_sentinel.discovery.config_locations import ConfigLocation
-from mcp_sentinel.discovery.parser import load_config_file, parse_config_dict
+from mcp_sentinel.discovery.parser import extract_raw_entries, load_config_file, parse_config_dict
 from mcp_sentinel.models import TransportType
 
 
@@ -123,3 +123,23 @@ def test_load_config_file_valid(tmp_path):
     servers, warnings = load_config_file(ConfigLocation("claude-desktop", path))
     assert warnings == []
     assert len(servers) == 1
+
+
+def test_extract_raw_entries_returns_verbatim_secrets(tmp_path):
+    path = tmp_path / "secret.json"
+    path.write_text(
+        json.dumps({"mcpServers": {"billing": {"url": "https://x", "headers": {"Authorization": "Bearer real-secret-value"}}}}),
+        encoding="utf-8",
+    )
+    raw = extract_raw_entries(ConfigLocation("cursor-user", path))
+    assert raw["billing"]["headers"]["Authorization"] == "Bearer real-secret-value"
+
+
+def test_extract_raw_entries_missing_file_returns_empty(tmp_path):
+    assert extract_raw_entries(ConfigLocation("claude-desktop", tmp_path / "nope.json")) == {}
+
+
+def test_extract_raw_entries_invalid_json_returns_empty(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text("{not json", encoding="utf-8")
+    assert extract_raw_entries(ConfigLocation("claude-desktop", path)) == {}

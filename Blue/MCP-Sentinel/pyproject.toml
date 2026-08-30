@@ -22,3 +22,7 @@ packages = [
     "mcp_sentinel.report",
     "cli",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
