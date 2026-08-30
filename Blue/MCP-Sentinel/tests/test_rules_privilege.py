@@ -146,3 +146,21 @@ def test_auto_approved_readonly_tool_not_flagged_for_auto_approve():
     tool = make_tool(name="get_weather", description="Returns weather.", read_only_hint=True)
     findings = check_tool_privileges("srv:demo", tool, auto_approved_tools=("get_weather",))
     assert not any(f.finding_id.startswith("priv-auto-approve-destructive:") for f in findings)
+
+
+def test_acronym_prefixed_exec_name_is_flagged():
+    # Regression test: a round-2 review found the first camelCase boundary
+    # rule alone (lower/digit -> upper) never isolates an acronym fused
+    # directly onto the following verb - "OSExec" stayed as one word since
+    # there's no lowercase/digit before the "E" of "Exec".
+    for name in ("OSExec", "APIShell"):
+        tool = make_tool(name=name, description="")
+        findings = check_tool_privileges("srv:demo", tool)
+        assert any(f.finding_id.startswith("priv-exec:") for f in findings), f"{name} should be flagged"
+
+
+def test_acronym_prefixed_destructive_name_is_flagged():
+    for name in ("HTTPDropTable", "DBDropAll", "IOSDeleteAll"):
+        tool = make_tool(name=name, description="")
+        findings = check_tool_privileges("srv:demo", tool)
+        assert any(f.finding_id.startswith("priv-undeclared:") for f in findings), f"{name} should be flagged"

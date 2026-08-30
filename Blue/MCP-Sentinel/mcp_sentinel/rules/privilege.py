@@ -44,7 +44,14 @@ _WRITE_PATTERN = re.compile(r"\b(writ\w*|creat\w*|updat\w*|modif\w*|edit\w*|inse
 _BROAD_PARAM_NAMES = {"path", "file_path", "filepath", "cwd", "command", "cmd", "url", "uri", "query", "code", "script"}
 
 _WORD_JOINER_PATTERN = re.compile(r"[_\-]+")
-_CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+# Two boundary rules, the standard pair for splitting identifiers that mix
+# acronyms and words: lower/digit -> upper ("runShell" -> "run Shell") and
+# upper -> upper-then-lower ("OSExec" -> "OS Exec", "HTTPDropTable" ->
+# "HTTP Drop Table"). A round-2 review found the first rule alone still
+# fused an acronym straight into the following verb ("HTTPDrop" never
+# isolated "Drop"), letting an acronym-prefixed exec/destructive tool name
+# evade every keyword rule below.
+_CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _tool_text(tool: ToolInfo) -> str:

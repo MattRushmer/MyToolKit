@@ -137,6 +137,26 @@ async def _list_all_prompts(client: Client) -> list[PromptInfo]:
     return prompts
 
 
+def _scrub_secrets(text: str, config: MCPServerConfig, args: list[str] | None, url: str | None) -> str:
+    """A connection failure's exception message is formatted by whatever
+    library raised it (httpx2, anyio, the stdio subprocess machinery) from
+    the REAL args/url this function was given to actually attempt the
+    connection - not the redacted MCPServerConfig - so a library that embeds
+    the failing URL or command line in its own error text (e.g. an httpx2
+    ConnectError repeating the request URL) could otherwise leak a
+    credential straight back out through `connection_error`, bypassing the
+    redaction discovery/parser.py already did. Defensively replace any real
+    value that differs from its redacted counterpart with that counterpart."""
+    real_args = args if args is not None else list(config.args)
+    for raw_value, redacted_value in zip(real_args, config.args):
+        if raw_value != redacted_value and raw_value in text:
+            text = text.replace(raw_value, redacted_value)
+    real_url = url or config.url
+    if real_url and config.url and real_url != config.url and real_url in text:
+        text = text.replace(real_url, config.url)
+    return text
+
+
 async def introspect_server(
     config: MCPServerConfig,
     *,
@@ -174,6 +194,6 @@ async def introspect_server(
     except TimeoutError:
         inventory.connection_error = f"timed out after {timeout_seconds}s"
     except Exception as exc:  # noqa: BLE001 - any connector/protocol failure degrades to a finding, never crashes the scan
-        inventory.connection_error = f"{type(exc).__name__}: {exc}"
+        inventory.connection_error = _scrub_secrets(f"{type(exc).__name__}: {exc}", config, args, url)
 
     return inventory

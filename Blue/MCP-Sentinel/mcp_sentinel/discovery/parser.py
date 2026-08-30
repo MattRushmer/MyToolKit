@@ -25,14 +25,22 @@ _AUTH_HEADER_NAMES = {"authorization", "x-api-key", "api-key", "x-auth-token"}
 
 REDACTED_PLACEHOLDER = "<redacted-by-mcp-sentinel>"
 
-# A CLI flag whose name suggests the next argument is a credential.
-_SECRET_FLAG_PATTERN = re.compile(r"--?(api[-_]?key|token|password|secret|auth)[=]?", re.IGNORECASE)
+# Matched with .search() (anywhere in the identifier, not just as an exact
+# name or an immediate suffix) against BOTH a CLI flag name and a URL query
+# param / fragment key. A round-2 security review found the original
+# exact-prefix-match version missed "--client-secret", "refresh_token",
+# "id_token", etc. Substring matching over-redacts occasionally (e.g. a
+# "--keyword" flag) - that's the intended, accepted tradeoff for a mechanism
+# whose failure mode must be "redacts too much," never "leaks a credential."
+_SECRET_KEYWORDS = re.compile(r"(api[-_]?key|token|passwd|password|secret|credential|auth)", re.IGNORECASE)
 # A bare value that looks like an opaque credential regardless of context
 # (long run of token-safe characters) - redacted defensively even without a
 # preceding flag name, since some servers take a credential as a positional arg.
-_LOOKS_LIKE_SECRET_VALUE = re.compile(r"^[A-Za-z0-9_\-\.]{16,}$")
+_LOOKS_LIKE_SECRET_VALUE = re.compile(r"^[A-Za-z0-9_\-\.+]{16,}$")
 
-_SECRET_QUERY_PARAM_NAMES = {"token", "api_key", "apikey", "key", "secret", "password", "auth", "access_token"}
+
+def _is_secret_flag_name(candidate: str) -> bool:
+    return candidate.startswith("-") and bool(_SECRET_KEYWORDS.search(candidate))
 
 
 def _looks_like_auth_header(headers: dict[str, Any] | None) -> bool:
@@ -45,30 +53,86 @@ def _redact_args(args: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Returns (redacted_args, secret_like_flags) from the RAW arg list. Only
     the return value here is ever persisted to MCPServerConfig - the caller
     (engine.py, via extract_raw_entries) is responsible for getting the real
-    args back to the connector at connect time."""
+    args back to the connector at connect time.
+
+    Handles both CLI conventions for passing a flag's value: space-separated
+    ("--api-key" "<value>", two array entries) and inline ("--api-key=<value>",
+    one entry) - each arg is split on its own "=" first so the inline form's
+    value never ends up copied into `flags` (which only ever holds a flag
+    *name*) or left un-redacted in `redacted`.
+    """
     redacted = list(args)
     flags: list[str] = []
     for i, arg in enumerate(args):
-        if _SECRET_FLAG_PATTERN.match(arg):
+        flag_part, sep, _value_part = arg.partition("=")
+        if sep and _is_secret_flag_name(flag_part):
+            flags.append(flag_part)
+            redacted[i] = f"{flag_part}={REDACTED_PLACEHOLDER}"
+            continue
+        if _is_secret_flag_name(arg):
             flags.append(arg)
             if i + 1 < len(args):
                 redacted[i + 1] = REDACTED_PLACEHOLDER
-        elif _LOOKS_LIKE_SECRET_VALUE.match(arg):
+            continue
+        if _LOOKS_LIKE_SECRET_VALUE.match(arg):
             redacted[i] = REDACTED_PLACEHOLDER
     return tuple(redacted), tuple(flags)
 
 
+def _redact_query_like(raw: str) -> tuple[str, bool]:
+    """Redacts secret-looking key=value pairs in a query string or fragment,
+    or the whole thing if it's a bare opaque value with no "=" at all (e.g. a
+    fragment that's just "#<access_token>" with no "key=value" framing - a
+    real shape for OAuth implicit-flow redirects). Returns (result, changed).
+
+    The no-"=" check must come first: parse_qsl(..., keep_blank_values=True)
+    on a string with no "=" treats the WHOLE string as a key with an empty
+    value, so if that string happens to contain a keyword substring (a bare
+    fragment token literally containing "token" is common), the naive
+    key=value path would redact the fabricated empty *value* and leave the
+    actual secret sitting untouched in the "key" position - the opposite of
+    what's intended.
+    """
+    if "=" not in raw:
+        return (REDACTED_PLACEHOLDER, True) if _LOOKS_LIKE_SECRET_VALUE.match(raw) else (raw, False)
+    pairs = parse_qsl(raw, keep_blank_values=True)
+    if not pairs or not any(_SECRET_KEYWORDS.search(k) for k, _ in pairs):
+        return raw, False
+    redacted_pairs = [(k, REDACTED_PLACEHOLDER if _SECRET_KEYWORDS.search(k) else v) for k, v in pairs]
+    return urlencode(redacted_pairs), True
+
+
 def _redact_url(url: str | None) -> str | None:
+    """Redacts credentials embedded in a URL: HTTP Basic-auth-style
+    userinfo (user:password@host), secret-looking query params, and a
+    secret-looking fragment (common in OAuth implicit-flow redirects, e.g.
+    "#access_token=..." or a bare opaque token with no "key=value" framing)."""
     if not url:
         return url
     parsed = urlsplit(url)
-    if not parsed.query:
+    changed = False
+
+    netloc = parsed.netloc
+    if parsed.username or parsed.password:
+        changed = True
+        host_part = parsed.hostname or ""
+        if parsed.port:
+            host_part = f"{host_part}:{parsed.port}"
+        netloc = f"{REDACTED_PLACEHOLDER}@{host_part}"
+
+    query = parsed.query
+    if query:
+        query, query_changed = _redact_query_like(query)
+        changed = changed or query_changed
+
+    fragment = parsed.fragment
+    if fragment:
+        fragment, frag_changed = _redact_query_like(fragment)
+        changed = changed or frag_changed
+
+    if not changed:
         return url
-    pairs = parse_qsl(parsed.query, keep_blank_values=True)
-    if not any(k.lower() in _SECRET_QUERY_PARAM_NAMES for k, _ in pairs):
-        return url
-    redacted_pairs = [(k, REDACTED_PLACEHOLDER if k.lower() in _SECRET_QUERY_PARAM_NAMES else v) for k, v in pairs]
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(redacted_pairs), parsed.fragment))
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, fragment))
 
 
 def _transport_for(entry: dict[str, Any]) -> TransportType:

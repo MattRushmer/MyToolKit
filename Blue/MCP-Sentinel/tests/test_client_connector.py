@@ -10,7 +10,7 @@ from pathlib import Path
 
 from factories import make_config
 
-from mcp_sentinel.client.connector import introspect_server
+from mcp_sentinel.client.connector import _scrub_secrets, introspect_server
 from mcp_sentinel.models import MCPServerConfig, TransportType
 
 FIXTURE_SERVER = Path(__file__).resolve().parents[1] / "fixtures" / "vulnerable_mcp_server" / "server.py"
@@ -66,3 +66,38 @@ async def test_introspect_unknown_transport_reports_error():
     inventory = await introspect_server(config, timeout_seconds=5)
     assert inventory.reachable is False
     assert "no command" in inventory.connection_error
+
+
+def test_scrub_secrets_replaces_real_value_with_redacted_counterpart():
+    # A round-2 security review flagged connection_error (built from the
+    # exception a library raises while connecting with the REAL args/url) as
+    # a residual leak channel if that library ever echoes the failing
+    # request back in its own error message.
+    config = make_config(
+        transport=TransportType.STDIO,
+        command="python",
+        args=("server.py", "--api-key", "<redacted-by-mcp-sentinel>"),
+    )
+    real_args = ["server.py", "--api-key", "sk_live_realsecret1234567890"]
+    message = "OSError: failed to spawn: server.py --api-key sk_live_realsecret1234567890"
+    scrubbed = _scrub_secrets(message, config, real_args, None)
+    assert "sk_live_realsecret1234567890" not in scrubbed
+    assert "<redacted-by-mcp-sentinel>" in scrubbed
+
+
+def test_scrub_secrets_replaces_real_url_with_redacted_counterpart():
+    config = make_config(
+        transport=TransportType.HTTP,
+        command=None,
+        url="https://mcp.example.com/mcp?token=<redacted-by-mcp-sentinel>",
+    )
+    real_url = "https://mcp.example.com/mcp?token=real-secret-value-1234567890"
+    message = f"ConnectError: could not reach {real_url}"
+    scrubbed = _scrub_secrets(message, config, None, real_url)
+    assert "real-secret-value-1234567890" not in scrubbed
+
+
+def test_scrub_secrets_is_a_noop_when_nothing_was_redacted():
+    config = make_config(transport=TransportType.STDIO, command="python", args=("--port", "8080"))
+    message = "OSError: failed to spawn: python --port 8080"
+    assert _scrub_secrets(message, config, ["--port", "8080"], None) == message

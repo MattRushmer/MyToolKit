@@ -39,6 +39,22 @@ def test_secret_flag_and_following_value_are_redacted_in_args():
     assert "sk_live_51H8x9zK2example" not in repr(s)
 
 
+def test_inline_flag_equals_value_form_is_redacted():
+    # Regression test: --flag=value (one array entry) is a common alternate
+    # CLI convention to --flag value (two entries). A round-2 security review
+    # found the original fix only handled the two-entry form - .match()
+    # against "--api-key=<secret>" succeeded on just the "--api-key=" prefix,
+    # so the code took the "it's a flag name" branch and appended the WHOLE
+    # "--api-key=<secret>" string (secret included) as the "flag name",
+    # leaving the actual secret value untouched in `args` too.
+    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key=sk_live_51H8x9zK2example"]}}}
+    servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
+    s = servers[0]
+    assert s.args == ("sync.py", "--api-key=<redacted-by-mcp-sentinel>")
+    assert s.secret_like_arg_flags == ("--api-key",)
+    assert "sk_live_51H8x9zK2example" not in repr(s)
+
+
 def test_bare_opaque_looking_value_is_redacted_even_without_a_flag():
     data = {"mcpServers": {"srv": {"command": "python", "args": ["server.py", "AKIAIOSFODNN7EXAMPLEAKIA1234567890"]}}}
     servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")

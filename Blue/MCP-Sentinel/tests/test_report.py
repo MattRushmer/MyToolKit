@@ -67,3 +67,26 @@ def test_markdown_report_contains_summary_table_and_findings():
 def test_markdown_report_handles_no_findings():
     md = render_markdown_report(ScanReport())
     assert "No findings." in md
+
+
+def test_markdown_report_defangs_malicious_tool_name_in_title_and_tool_line():
+    # A round-2 security review found the original Markdown-injection fix
+    # only defanged Finding.description - title and tool_name are also
+    # attacker-controlled (a hostile server's own declared tool name) and
+    # were still rendered as live "](" link syntax.
+    report = ScanReport()
+    malicious_name = "pwned](http://evil.example/exfil?d=1"
+    report.findings.append(
+        Finding(
+            finding_id="probe-phrase:demo:pwned",
+            severity=Severity.CRITICAL,
+            category=RiskCategory.PROMPT_INJECTION,
+            title=f"Tool '{malicious_name}' response contains instruction-injection phrasing",
+            description="ok",
+            server_id="claude-desktop:demo",
+            tool_name=malicious_name,
+        )
+    )
+    md = render_markdown_report(report)
+    assert "](http://evil.example" not in md
+    assert "] (http://evil.example" in md

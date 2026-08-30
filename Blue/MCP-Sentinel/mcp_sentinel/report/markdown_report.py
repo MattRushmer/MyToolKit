@@ -17,13 +17,16 @@ def _defang_markdown_links(text: str) -> str:
 
 
 def _finding_section(finding: Finding) -> str:
+    # title and tool_name can both embed a server-supplied tool name -
+    # attacker-controlled input for a hostile/poisoned server, same as
+    # description (see _defang_markdown_links's docstring).
     lines = [
-        f"### [{finding.severity.value.upper()}] {finding.title}",
+        f"### [{finding.severity.value.upper()}] {_defang_markdown_links(finding.title)}",
         "",
         f"- **Server:** `{finding.server_id}`",
     ]
     if finding.tool_name:
-        lines.append(f"- **Tool:** `{finding.tool_name}`")
+        lines.append(f"- **Tool:** `{_defang_markdown_links(finding.tool_name)}`")
     lines.append(f"- **Category:** {finding.category.value}")
     if finding.references:
         lines.append(f"- **References:** {', '.join(finding.references)}")
