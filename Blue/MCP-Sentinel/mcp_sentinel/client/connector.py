@@ -35,7 +35,7 @@ from mcp_sentinel.models import (
 logger = logging.getLogger(__name__)
 
 
-def _build_transport(config: MCPServerConfig, headers: dict[str, str] | None, env: dict[str, str] | None) -> Any:
+def build_transport(config: MCPServerConfig, headers: dict[str, str] | None, env: dict[str, str] | None) -> Any:
     if config.transport == TransportType.STDIO:
         if not config.command:
             raise ValueError(f"server '{config.server_id}' is configured for stdio but has no command")
@@ -138,7 +138,7 @@ async def introspect_server(
     inventory = ServerInventory(config=config)
 
     try:
-        transport = _build_transport(config, headers, env)
+        transport = build_transport(config, headers, env)
     except ValueError as exc:
         inventory.connection_error = str(exc)
         return inventory
