@@ -11,19 +11,31 @@ from mcp_sentinel.rules.catalog import OWASP_COMMAND_INJECTION, OWASP_PRIVILEGE_
 
 # Verb stems (matched with a trailing \w* so "delete"/"deletes"/"deleting"
 # all hit, and against text pre-normalized to turn "run_shell_command" /
-# "run-shell-command" into "run shell command" first - a bare \b...\b would
-# never isolate "shell" inside an underscore-joined identifier, since regex
-# treats "_" as a word character with no boundary on either side of it).
+# "run-shell-command" / "runShellCommand" into "run shell command" first - a
+# bare \b...\b would never isolate "shell" inside an underscore-joined
+# identifier, since regex treats "_" as a word character with no boundary on
+# either side of it, and camelCase has no separator character at all).
+#
+# eval(?!uat) rather than a bare eval\w*: the bare stem also matches
+# "evaluate"/"evaluation" - ordinary English words for "assess", not a
+# code-execution primitive - which produced false CRITICAL/HIGH findings on
+# perfectly benign tools like evaluate_expression/get_evaluation_report.
 _EXEC_PATTERN = re.compile(
-    r"\b(exec\w*|eval\w*|shell|bash|powershell|subprocess\w*|os\.system|"
+    r"\b(exec\w*|eval(?!uat)\w*|shell|bash|powershell|subprocess\w*|os\.system|"
     r"run\s?command|arbitrary\s?(code|command)|run\s?script)\b",
     re.IGNORECASE,
 )
 
 # Verbs that indicate the tool mutates or destroys state - relevant for
 # checking whether destructive_hint was honestly declared.
+#
+# drop(?!down) excludes "dropdown"; "wip\w*" was replaced with "wipe\w*" since
+# bare "wip" (as in "work in progress") is a common benign abbreviation, not
+# a destructive verb; bare "format\w*" was dropped entirely - "format_date"/
+# "format_currency" utility tools are far more common in the wild than a
+# literal disk-format tool, and the ambiguity made this stem net-negative.
 _DESTRUCTIVE_PATTERN = re.compile(
-    r"\b(delete\w*|remov\w*|drop\w*|truncat\w*|destroy\w*|wip\w*|purg\w*|overwrit\w*|format\w*)\b", re.IGNORECASE
+    r"\b(delete\w*|remov\w*|drop(?!down)\w*|truncat\w*|destroy\w*|wipe\w*|purg\w*|overwrit\w*)\b", re.IGNORECASE
 )
 
 _WRITE_PATTERN = re.compile(r"\b(writ\w*|creat\w*|updat\w*|modif\w*|edit\w*|insert\w*|sav\w*|upload\w*|send\w*)\b", re.IGNORECASE)
@@ -32,13 +44,16 @@ _WRITE_PATTERN = re.compile(r"\b(writ\w*|creat\w*|updat\w*|modif\w*|edit\w*|inse
 _BROAD_PARAM_NAMES = {"path", "file_path", "filepath", "cwd", "command", "cmd", "url", "uri", "query", "code", "script"}
 
 _WORD_JOINER_PATTERN = re.compile(r"[_\-]+")
+_CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
 def _tool_text(tool: ToolInfo) -> str:
-    # Normalize identifier joiners to spaces purely for keyword matching, so
-    # e.g. "run_shell_command" reads as "run shell command" - see the comment
+    # Normalize identifier joiners AND camelCase boundaries to spaces, purely
+    # for keyword matching, so "run_shell_command"/"run-shell-command"/
+    # "runShellCommand" all read as "run shell command" - see the comment
     # above _EXEC_PATTERN for why this matters.
-    return _WORD_JOINER_PATTERN.sub(" ", f"{tool.name} {tool.description}")
+    text = _WORD_JOINER_PATTERN.sub(" ", f"{tool.name} {tool.description}")
+    return _CAMEL_CASE_BOUNDARY.sub(" ", text)
 
 
 def _schema_properties(tool: ToolInfo) -> dict[str, Any]:

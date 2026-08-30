@@ -31,9 +31,13 @@ def test_stdio_transport_not_flagged_for_missing_auth_header():
 
 
 def test_stdio_secret_flag_name_flagged():
-    config = make_config(transport=TransportType.STDIO, command="python", args=("--api-key", "sk-abcdef1234567890"))
+    # secret_like_arg_flags is what discovery/parser.py's _redact_args
+    # already detected from the *raw* args before redaction - check_transport_auth
+    # never re-inspects config.args (which is redacted) for this.
+    config = make_config(transport=TransportType.STDIO, command="python", args=("--api-key", "<redacted-by-mcp-sentinel>"), secret_like_arg_flags=("--api-key",))
     findings = check_transport_auth(config)
     assert any("secret" in f.finding_id for f in findings)
+    assert findings[0].evidence["redacted_args"] == ["--api-key", "<redacted-by-mcp-sentinel>"]
 
 
 def test_stdio_benign_args_not_flagged():

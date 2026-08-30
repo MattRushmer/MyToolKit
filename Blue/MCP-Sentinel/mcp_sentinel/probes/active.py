@@ -32,6 +32,12 @@ from mcp_sentinel.rules.privilege import has_exec_indicators
 
 logger = logging.getLogger(__name__)
 
+# A probed tool is calling out to an explicitly untrusted/hostile server by
+# design - cap how much of its response we ever hold in memory or run regexes
+# (and, if configured, an LLM call) over, so a malicious server can't inflate
+# scanner memory/CPU use by returning an arbitrarily large result.
+_MAX_RESPONSE_CHARS = 50_000
+
 
 def is_safe_to_probe(tool: ToolInfo) -> bool:
     return tool.annotations.read_only_hint is True and not has_exec_indicators(tool)
@@ -39,11 +45,15 @@ def is_safe_to_probe(tool: ToolInfo) -> bool:
 
 def _extract_text(result) -> str:  # noqa: ANN001 - CallToolResult from mcp_types, kept loosely typed to avoid a hard SDK-internal import here
     parts: list[str] = []
+    total = 0
     for block in getattr(result, "content", None) or []:
         text = getattr(block, "text", None)
         if text:
             parts.append(text)
-    return "\n".join(parts)
+            total += len(text)
+            if total >= _MAX_RESPONSE_CHARS:
+                break
+    return "\n".join(parts)[:_MAX_RESPONSE_CHARS]
 
 
 async def run_active_probes(client: Client, inventory: ServerInventory, *, read_timeout_seconds: float = 15.0) -> list[Finding]:
@@ -60,7 +70,7 @@ async def run_active_probes(client: Client, inventory: ServerInventory, *, read_
 
         try:
             result = await client.call_tool(tool.name, args, read_timeout_seconds=read_timeout_seconds)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a probe call erroring on our synthetic input isn't a finding, just skip it (see module docstring)
             logger.debug("probe call to %s on %s failed; skipping", tool.name, server_id, exc_info=True)
             continue
 

@@ -85,8 +85,21 @@ class MCPServerConfig:
     source_config_path: str
     transport: TransportType
     command: str | None = None
+    # Redacted at parse time (see discovery/parser.py's _redact_args): any
+    # value that looks like a credential is replaced with a placeholder
+    # before it ever reaches this field, since this is what gets serialized
+    # into every JSON/Markdown report. The real values needed to actually
+    # launch the server are re-read separately and transiently at connect
+    # time - see discovery/parser.py's extract_raw_entries.
     args: tuple[str, ...] = ()
+    # Flag names only (e.g. "--api-key") - never the value - for launch args
+    # that looked like they carried a credential. Safe to persist, same
+    # principle as env_var_names below.
+    secret_like_arg_flags: tuple[str, ...] = ()
     env_var_names: tuple[str, ...] = ()  # names only - never the values, to avoid persisting secrets
+    # Redacted at parse time (see discovery/parser.py's _redact_url): any
+    # query-string parameter that looks like a credential is replaced with a
+    # placeholder. Same real-vs-persisted split as `args` above.
     url: str | None = None
     has_auth_header: bool = False
     # Some hosts (e.g. Cline) let a server auto-approve tool calls without a

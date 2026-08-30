@@ -35,22 +35,37 @@ from mcp_sentinel.models import (
 logger = logging.getLogger(__name__)
 
 
-def build_transport(config: MCPServerConfig, headers: dict[str, str] | None, env: dict[str, str] | None) -> Any:
+def build_transport(
+    config: MCPServerConfig,
+    headers: dict[str, str] | None,
+    env: dict[str, str] | None,
+    *,
+    args: list[str] | None = None,
+    url: str | None = None,
+    timeout_seconds: float = 15.0,
+) -> Any:
+    """`args`/`url` override `config.args`/`config.url` when given - the engine
+    passes the real, unredacted values here (see discovery/parser.py's
+    extract_raw_entries), since MCPServerConfig itself only ever holds a
+    redacted copy safe to persist into a report. Falling back to `config.*`
+    keeps this usable directly (e.g. in tests) when no raw entry is available."""
     if config.transport == TransportType.STDIO:
         if not config.command:
             raise ValueError(f"server '{config.server_id}' is configured for stdio but has no command")
-        return StdioServerParameters(command=config.command, args=list(config.args), env=env or None)
+        effective_args = args if args is not None else list(config.args)
+        return StdioServerParameters(command=config.command, args=effective_args, env=env or None)
 
-    if not config.url:
+    effective_url = url or config.url
+    if not effective_url:
         raise ValueError(f"server '{config.server_id}' is configured for {config.transport.value} but has no url")
 
     if config.transport == TransportType.HTTP:
         if headers:
-            return streamable_http_client(config.url, http_client=httpx2.AsyncClient(headers=headers))
-        return config.url  # Client(server=<str>) opens a plain streamable_http_client itself
+            return streamable_http_client(effective_url, http_client=httpx2.AsyncClient(headers=headers, timeout=timeout_seconds))
+        return effective_url  # Client(server=<str>) opens a plain streamable_http_client itself
 
     if config.transport == TransportType.SSE:
-        return sse_client(config.url, headers=headers or None)
+        return sse_client(effective_url, headers=headers or None, timeout=timeout_seconds)
 
     raise ValueError(f"unsupported transport: {config.transport}")
 
@@ -127,6 +142,8 @@ async def introspect_server(
     *,
     headers: dict[str, str] | None = None,
     env: dict[str, str] | None = None,
+    args: list[str] | None = None,
+    url: str | None = None,
     timeout_seconds: float = 15.0,
 ) -> ServerInventory:
     """Connect to `config` and enumerate its tools/resources/prompts.
@@ -138,7 +155,7 @@ async def introspect_server(
     inventory = ServerInventory(config=config)
 
     try:
-        transport = build_transport(config, headers, env)
+        transport = build_transport(config, headers, env, args=args, url=url, timeout_seconds=timeout_seconds)
     except ValueError as exc:
         inventory.connection_error = str(exc)
         return inventory

@@ -11,7 +11,7 @@ from rich.table import Table
 from mcp_sentinel.config import settings
 from mcp_sentinel.discovery.config_locations import ConfigLocation, existing_config_locations, known_config_locations
 from mcp_sentinel.engine import ScanOptions, run_scan
-from mcp_sentinel.models import Severity
+from mcp_sentinel.models import ScanReport, Severity
 from mcp_sentinel.report.json_report import report_to_json
 from mcp_sentinel.report.markdown_report import render_markdown_report
 
@@ -33,7 +33,7 @@ def list_configs() -> None:
     console.print(table)
 
 
-def _render_summary(report) -> None:  # noqa: ANN001 - ScanReport, kept loose to avoid importing it just for the hint here
+def _render_summary(report: ScanReport) -> None:
     table = Table(title=f"MCP Sentinel — {report.total_servers} server(s), {report.total_tools} tool(s)")
     for column in ("Severity", "Count"):
         table.add_column(column)
@@ -61,10 +61,18 @@ def scan(
     fail_on: Severity | None = typer.Option(None, "--fail-on", help="Exit non-zero if any finding at or above this severity is present (critical/high/medium/low/info)."),
 ) -> None:
     """Scan MCP servers: discover configs, connect, inventory tools, and flag risks."""
-    locations = [ConfigLocation("manual", Path(p)) for p in config] if config else existing_config_locations()
-    if not locations:
-        console.print("[yellow]No MCP client config files found. Pass --config to point at one explicitly, or run 'list-configs' to see known locations.[/yellow]")
-        raise typer.Exit(1)
+    if config:
+        missing = [p for p in config if not Path(p).is_file()]
+        if missing:
+            for p in missing:
+                console.print(f"[red]Config file not found:[/red] {p}")
+            raise typer.Exit(1)
+        locations = [ConfigLocation("manual", Path(p)) for p in config]
+    else:
+        locations = existing_config_locations()
+        if not locations:
+            console.print("[yellow]No MCP client config files found. Pass --config to point at one explicitly, or run 'list-configs' to see known locations.[/yellow]")
+            raise typer.Exit(1)
 
     options = ScanOptions(active_probes=active, check_drift=not no_drift, timeout_seconds=timeout or settings.timeout_seconds)
     report, warnings = asyncio.run(run_scan(locations, options))

@@ -6,6 +6,16 @@ from mcp_sentinel.models import Finding, ScanReport, Severity
 _SEVERITY_ORDER = (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO)
 
 
+def _defang_markdown_links(text: str) -> str:
+    """A Finding's description can carry attacker-influenced text (e.g. the
+    optional LLM judge is explicitly allowed to quote a short fragment of a
+    hostile tool response in its reasoning - see llm/prompts.py). Breaking
+    the "](" that starts a Markdown link/image target keeps that quoted text
+    readable while stopping it from becoming a live link a viewer might
+    auto-render or auto-fetch."""
+    return text.replace("](", "] (")
+
+
 def _finding_section(finding: Finding) -> str:
     lines = [
         f"### [{finding.severity.value.upper()}] {finding.title}",
@@ -18,7 +28,7 @@ def _finding_section(finding: Finding) -> str:
     if finding.references:
         lines.append(f"- **References:** {', '.join(finding.references)}")
     lines.append("")
-    lines.append(finding.description)
+    lines.append(_defang_markdown_links(finding.description))
     if finding.recommendation:
         lines.append("")
         lines.append(f"**Recommendation:** {finding.recommendation}")

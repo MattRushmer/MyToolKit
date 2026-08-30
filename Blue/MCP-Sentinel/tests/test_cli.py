@@ -42,6 +42,18 @@ def test_scan_with_no_configs_found_exits_nonzero(tmp_path, monkeypatch):
     assert "No MCP client config files found" in result.stdout
 
 
+def test_scan_with_nonexistent_explicit_config_errors_instead_of_reporting_clean(tmp_path):
+    # A typo'd --config path must not be indistinguishable from "scanned zero
+    # servers, all clean" (exit 0) - that would silently defeat --fail-on in CI.
+    missing_path = tmp_path / "does-not-exist.json"
+    result = runner.invoke(app, ["scan", "--config", str(missing_path)])
+    assert result.exit_code == 1
+    assert "Config file not found" in result.stdout
+    # Rich can hard-wrap a long path across lines at the test runner's terminal
+    # width, so compare with those wraps stripped out rather than as one substring.
+    assert str(missing_path) in result.stdout.replace("\n", "")
+
+
 def test_scan_against_explicit_config_reports_findings(tmp_path):
     config_path = _write_config(tmp_path)
     result = runner.invoke(app, ["scan", "--config", str(config_path), "--no-drift"])

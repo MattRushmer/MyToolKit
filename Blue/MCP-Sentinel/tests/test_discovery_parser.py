@@ -30,6 +30,55 @@ def test_parses_stdio_mcpservers_shape():
     assert "secret-value" not in repr(s)
 
 
+def test_secret_flag_and_following_value_are_redacted_in_args():
+    data = {"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "sk_live_51H8x9zK2example"]}}}
+    servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
+    s = servers[0]
+    assert s.args == ("sync.py", "--api-key", "<redacted-by-mcp-sentinel>")
+    assert s.secret_like_arg_flags == ("--api-key",)
+    assert "sk_live_51H8x9zK2example" not in repr(s)
+
+
+def test_bare_opaque_looking_value_is_redacted_even_without_a_flag():
+    data = {"mcpServers": {"srv": {"command": "python", "args": ["server.py", "AKIAIOSFODNN7EXAMPLEAKIA1234567890"]}}}
+    servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
+    s = servers[0]
+    assert s.args == ("server.py", "<redacted-by-mcp-sentinel>")
+    assert "AKIAIOSFODNN7EXAMPLEAKIA1234567890" not in repr(s)
+
+
+def test_short_benign_args_are_not_redacted():
+    data = {"mcpServers": {"srv": {"command": "python", "args": ["-y", "server.py", "/tmp/data"]}}}
+    servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
+    assert servers[0].args == ("-y", "server.py", "/tmp/data")
+    assert servers[0].secret_like_arg_flags == ()
+
+
+def test_secret_query_param_redacted_in_url():
+    data = {"mcpServers": {"billing": {"url": "https://mcp.example.com/mcp?token=abc123secretvalue&region=us", "type": "http"}}}
+    servers, _ = parse_config_dict("cursor-user", "mcpServers", data, "/fake/cursor.json")
+    s = servers[0]
+    assert "abc123secretvalue" not in s.url
+    assert "token=%3Credacted-by-mcp-sentinel%3E" in s.url
+    assert "region=us" in s.url
+
+
+def test_url_without_secret_query_param_is_unchanged():
+    data = {"mcpServers": {"billing": {"url": "https://mcp.example.com/mcp?region=us", "type": "http"}}}
+    servers, _ = parse_config_dict("cursor-user", "mcpServers", data, "/fake/cursor.json")
+    assert servers[0].url == "https://mcp.example.com/mcp?region=us"
+
+
+def test_extract_raw_entries_still_returns_unredacted_secret_for_live_connection(tmp_path):
+    path = tmp_path / "secret.json"
+    path.write_text(
+        json.dumps({"mcpServers": {"crm": {"command": "python", "args": ["sync.py", "--api-key", "sk_live_real_secret_value"]}}}),
+        encoding="utf-8",
+    )
+    raw = extract_raw_entries(ConfigLocation("cline", path))
+    assert raw["crm"]["args"] == ["sync.py", "--api-key", "sk_live_real_secret_value"]
+
+
 def test_parses_remote_http_shape_with_auth_header():
     data = {
         "mcpServers": {

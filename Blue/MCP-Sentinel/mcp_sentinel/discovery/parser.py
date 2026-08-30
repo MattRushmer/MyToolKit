@@ -13,19 +13,62 @@ rather than discard.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from mcp_sentinel.discovery.config_locations import ConfigLocation
 from mcp_sentinel.models import MCPServerConfig, TransportType
 
 _AUTH_HEADER_NAMES = {"authorization", "x-api-key", "api-key", "x-auth-token"}
 
+REDACTED_PLACEHOLDER = "<redacted-by-mcp-sentinel>"
+
+# A CLI flag whose name suggests the next argument is a credential.
+_SECRET_FLAG_PATTERN = re.compile(r"--?(api[-_]?key|token|password|secret|auth)[=]?", re.IGNORECASE)
+# A bare value that looks like an opaque credential regardless of context
+# (long run of token-safe characters) - redacted defensively even without a
+# preceding flag name, since some servers take a credential as a positional arg.
+_LOOKS_LIKE_SECRET_VALUE = re.compile(r"^[A-Za-z0-9_\-\.]{16,}$")
+
+_SECRET_QUERY_PARAM_NAMES = {"token", "api_key", "apikey", "key", "secret", "password", "auth", "access_token"}
+
 
 def _looks_like_auth_header(headers: dict[str, Any] | None) -> bool:
     if not headers:
         return False
     return any(str(k).lower() in _AUTH_HEADER_NAMES for k in headers)
+
+
+def _redact_args(args: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Returns (redacted_args, secret_like_flags) from the RAW arg list. Only
+    the return value here is ever persisted to MCPServerConfig - the caller
+    (engine.py, via extract_raw_entries) is responsible for getting the real
+    args back to the connector at connect time."""
+    redacted = list(args)
+    flags: list[str] = []
+    for i, arg in enumerate(args):
+        if _SECRET_FLAG_PATTERN.match(arg):
+            flags.append(arg)
+            if i + 1 < len(args):
+                redacted[i + 1] = REDACTED_PLACEHOLDER
+        elif _LOOKS_LIKE_SECRET_VALUE.match(arg):
+            redacted[i] = REDACTED_PLACEHOLDER
+    return tuple(redacted), tuple(flags)
+
+
+def _redact_url(url: str | None) -> str | None:
+    if not url:
+        return url
+    parsed = urlsplit(url)
+    if not parsed.query:
+        return url
+    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(k.lower() in _SECRET_QUERY_PARAM_NAMES for k, _ in pairs):
+        return url
+    redacted_pairs = [(k, REDACTED_PLACEHOLDER if k.lower() in _SECRET_QUERY_PARAM_NAMES else v) for k, v in pairs]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(redacted_pairs), parsed.fragment))
 
 
 def _transport_for(entry: dict[str, Any]) -> TransportType:
@@ -56,7 +99,8 @@ def parse_server_entry(host_app: str, config_name: str, entry: dict[str, Any], s
     transport = _transport_for(entry)
     headers = entry.get("headers") if isinstance(entry.get("headers"), dict) else None
     env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
-    args = entry.get("args") if isinstance(entry.get("args"), list) else []
+    raw_args = entry.get("args") if isinstance(entry.get("args"), list) else []
+    redacted_args, secret_flags = _redact_args([str(a) for a in raw_args])
 
     return MCPServerConfig(
         server_id=f"{host_app}:{config_name}",
@@ -65,9 +109,10 @@ def parse_server_entry(host_app: str, config_name: str, entry: dict[str, Any], s
         source_config_path=source_path,
         transport=transport,
         command=entry.get("command"),
-        args=tuple(str(a) for a in args),
+        args=redacted_args,
+        secret_like_arg_flags=secret_flags,
         env_var_names=tuple(sorted(str(k) for k in env)),
-        url=entry.get("url"),
+        url=_redact_url(entry.get("url")),
         has_auth_header=_looks_like_auth_header(headers),
         auto_approved_tools=_auto_approved(entry),
     )
@@ -102,6 +147,8 @@ def _iter_raw_entries(schema: str, data: dict[str, Any], source_path: str) -> tu
                 continue
             for name, entry in raw_servers.items():
                 pairs.append((f"{project_path}::{name}", entry))
+    elif projects is not None:
+        warnings.append(f"{source_path}: 'projects' is not an object, skipping")
 
     top_level_key = "servers" if schema == "servers" else "mcpServers"
     raw_servers = data.get(top_level_key)

@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import anyio
 from mcp.client import Client
 
 from mcp_sentinel.client.connector import introspect_server
@@ -27,20 +28,42 @@ class ScanOptions:
     state_dir: Path = field(default_factory=lambda: Path(settings.state_dir))
 
 
-def _connection_secrets(server: MCPServerConfig, raw_entries_by_path: dict[str, dict]) -> tuple[dict[str, str] | None, dict[str, str] | None]:
+@dataclass(frozen=True)
+class _ConnectionSecrets:
+    """Real, unredacted values needed to open a live connection - see
+    discovery/parser.py's extract_raw_entries docstring. Never stored on
+    anything that ends up in a ScanReport or baseline file."""
+
+    env: dict[str, str] | None
+    headers: dict[str, str] | None
+    args: list[str] | None
+    url: str | None
+
+
+def _connection_secrets(server: MCPServerConfig, raw_entries_by_path: dict[str, dict]) -> _ConnectionSecrets:
     raw = raw_entries_by_path.get(server.source_config_path, {}).get(server.config_name, {})
     env = raw.get("env") if isinstance(raw.get("env"), dict) else None
     headers = raw.get("headers") if isinstance(raw.get("headers"), dict) else None
-    return env, headers
+    args = raw.get("args") if isinstance(raw.get("args"), list) else None
+    url = raw.get("url") if isinstance(raw.get("url"), str) else None
+    return _ConnectionSecrets(env=env, headers=headers, args=[str(a) for a in args] if args is not None else None, url=url)
 
 
-async def _probe_inventory(inventory: ServerInventory, env: dict[str, str] | None, headers: dict[str, str] | None, timeout_seconds: float) -> list[Finding]:
+async def _probe_inventory(inventory: ServerInventory, secrets: _ConnectionSecrets, timeout_seconds: float) -> list[Finding]:
     from mcp_sentinel.client.connector import build_transport
 
     try:
-        transport = build_transport(inventory.config, headers, env)
-        async with Client(server=transport, read_timeout_seconds=timeout_seconds) as client:
-            return await run_active_probes(client, inventory, read_timeout_seconds=timeout_seconds)
+        # Same outer deadline introspect_server uses: without it, a server
+        # that connects fine but answers each individual call_tool just under
+        # its own read_timeout_seconds could make one server's probe phase
+        # take up to (tool count x timeout_seconds) instead of being capped
+        # at timeout_seconds like every other phase of the scan.
+        with anyio.fail_after(timeout_seconds):
+            transport = build_transport(
+                inventory.config, secrets.headers, secrets.env, args=secrets.args, url=secrets.url, timeout_seconds=timeout_seconds
+            )
+            async with Client(server=transport, read_timeout_seconds=timeout_seconds) as client:
+                return await run_active_probes(client, inventory, read_timeout_seconds=timeout_seconds)
     except Exception:  # noqa: BLE001 - a probing-connection failure must not sink the whole scan; the server's static findings still stand
         return []
 
@@ -51,15 +74,19 @@ async def run_scan(locations: list[ConfigLocation] | None = None, options: ScanO
     options = options or ScanOptions()
     locations = locations if locations is not None else existing_config_locations()
 
-    servers, warnings = load_config_files(locations)
-    raw_entries_by_path: dict[str, dict] = {str(loc.path): extract_raw_entries(loc) for loc in locations}
+    servers, warnings = await anyio.to_thread.run_sync(load_config_files, locations)
+    raw_entries_by_path: dict[str, dict] = {}
+    for loc in locations:
+        raw_entries_by_path[str(loc.path)] = await anyio.to_thread.run_sync(extract_raw_entries, loc)
 
     report = ScanReport(active_probes_run=options.active_probes)
-    previous_baseline = baseline.load_baseline(options.state_dir) if options.check_drift else {}
+    previous_baseline = await anyio.to_thread.run_sync(baseline.load_baseline, options.state_dir) if options.check_drift else {}
 
     for server in servers:
-        env, headers = _connection_secrets(server, raw_entries_by_path)
-        inventory = await introspect_server(server, headers=headers, env=env, timeout_seconds=options.timeout_seconds)
+        secrets = _connection_secrets(server, raw_entries_by_path)
+        inventory = await introspect_server(
+            server, headers=secrets.headers, env=secrets.env, args=secrets.args, url=secrets.url, timeout_seconds=options.timeout_seconds
+        )
         report.inventories.append(inventory)
 
         report.findings.extend(auth.check_transport_auth(server))
@@ -73,10 +100,11 @@ async def run_scan(locations: list[ConfigLocation] | None = None, options: ScanO
         if options.check_drift:
             report.findings.extend(baseline.check_drift(inventory, previous_baseline))
         if options.active_probes:
-            report.findings.extend(await _probe_inventory(inventory, env, headers, options.timeout_seconds))
+            report.findings.extend(await _probe_inventory(inventory, secrets, options.timeout_seconds))
 
     if options.check_drift and options.save_baseline:
-        baseline.save_baseline(options.state_dir, baseline.build_baseline(report.inventories))
+        new_baseline = baseline.build_baseline(report.inventories)
+        await anyio.to_thread.run_sync(baseline.save_baseline, options.state_dir, new_baseline)
 
     return report, warnings
 
