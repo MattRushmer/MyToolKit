@@ -52,6 +52,14 @@ def _is_unconstrained_string(prop_schema: Any) -> bool:
     return prop_schema.get("type") == "string" and not any(k in prop_schema for k in ("enum", "pattern", "format", "maxLength"))
 
 
+def has_exec_indicators(tool: ToolInfo) -> bool:
+    """True if the tool's name/description matches shell/subprocess/code-exec
+    language. Exposed for probes/active.py's safety gate: a tool shouldn't be
+    actively invoked just because it *claims* readOnlyHint=true if it also
+    reads as an execution primitive - an annotation can lie."""
+    return bool(_EXEC_PATTERN.search(_tool_text(tool)))
+
+
 def check_tool_privileges(server_id: str, tool: ToolInfo, auto_approved_tools: tuple[str, ...] = ()) -> list[Finding]:
     findings: list[Finding] = []
     text = _tool_text(tool)

@@ -44,7 +44,7 @@ def test_large_base64_blob_detected():
 def test_oversized_description_detected():
     tool = make_tool(name="noop", description="x" * 2500)
     findings = check_tool_poisoning("srv:demo", tool)
-    assert any(f.finding_id.startswith("poison-oversized-description:") for f in findings)
+    assert any(f.finding_id.startswith("poison-oversized:") for f in findings)
 
 
 def test_resource_and_prompt_poisoning_use_same_detector():
