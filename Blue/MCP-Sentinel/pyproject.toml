@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-sentinel"
+version = "0.1.0"
+description = "Attack-surface scanner for MCP servers and agent tool-grants: inventories deployed MCP servers across an org's agent hosts, flags over-privileged/unauthenticated tools and tool poisoning, and actively probes tool responses for prompt injection."
+requires-python = ">=3.10"
+
+[project.scripts]
+mcp-sentinel = "cli.main:app"
+
+[tool.setuptools]
+packages = [
+    "mcp_sentinel",
+    "mcp_sentinel.discovery",
+    "mcp_sentinel.client",
+    "mcp_sentinel.rules",
+    "mcp_sentinel.probes",
+    "mcp_sentinel.llm",
+    "mcp_sentinel.report",
+    "cli",
+]

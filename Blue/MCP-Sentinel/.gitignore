@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+output/
+.pytest_cache/
+*.egg-info/
+error.log
+.mcp_sentinel_baseline.json
