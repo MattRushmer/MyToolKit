@@ -54,6 +54,40 @@ def test_remote_shape_without_auth_header_flagged_false():
     assert servers[0].has_auth_header is False
 
 
+def test_claude_code_projects_shape_finds_nested_servers():
+    data = {
+        "projects": {
+            "/home/dev/project-a": {"mcpServers": {"filesystem": {"command": "npx", "args": ["-y", "server-fs"]}}},
+            "/home/dev/project-b": {"mcpServers": {"billing": {"url": "https://mcp.example.com/mcp", "type": "http"}}},
+        }
+    }
+    servers, warnings = parse_config_dict("claude-code-user", "claude_code_projects", data, "/fake/.claude.json")
+    assert warnings == []
+    assert len(servers) == 2
+    names = {s.config_name for s in servers}
+    assert names == {"/home/dev/project-a::filesystem", "/home/dev/project-b::billing"}
+
+
+def test_claude_code_projects_shape_ignores_projects_without_mcp_servers():
+    data = {"projects": {"/home/dev/no-mcp": {"allowedTools": []}}}
+    servers, warnings = parse_config_dict("claude-code-user", "claude_code_projects", data, "/fake/.claude.json")
+    assert servers == []
+    assert warnings == []
+
+
+def test_claude_code_projects_shape_missing_projects_key_returns_empty():
+    servers, warnings = parse_config_dict("claude-code-user", "claude_code_projects", {}, "/fake/.claude.json")
+    assert servers == []
+    assert warnings == []
+
+
+def test_claude_code_projects_shape_non_dict_mcp_servers_warns():
+    data = {"projects": {"/home/dev/x": {"mcpServers": "oops"}}}
+    servers, warnings = parse_config_dict("claude-code-user", "claude_code_projects", data, "/fake/.claude.json")
+    assert servers == []
+    assert len(warnings) == 1
+
+
 def test_vscode_servers_shape():
     data = {"servers": {"github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"}}}
     servers, warnings = parse_config_dict("vscode-project", "servers", data, "/fake/.vscode/mcp.json")
@@ -133,6 +167,16 @@ def test_extract_raw_entries_returns_verbatim_secrets(tmp_path):
     )
     raw = extract_raw_entries(ConfigLocation("cursor-user", path))
     assert raw["billing"]["headers"]["Authorization"] == "Bearer real-secret-value"
+
+
+def test_extract_raw_entries_handles_claude_code_projects_shape(tmp_path):
+    path = tmp_path / ".claude.json"
+    path.write_text(
+        json.dumps({"projects": {"/home/dev/x": {"mcpServers": {"billing": {"env": {"TOKEN": "real-secret-value"}}}}}}),
+        encoding="utf-8",
+    )
+    raw = extract_raw_entries(ConfigLocation("claude-code-user", path, schema="claude_code_projects"))
+    assert raw["/home/dev/x::billing"]["env"]["TOKEN"] == "real-secret-value"
 
 
 def test_extract_raw_entries_missing_file_returns_empty(tmp_path):

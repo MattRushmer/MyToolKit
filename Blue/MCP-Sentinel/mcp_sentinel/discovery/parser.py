@@ -73,32 +73,65 @@ def parse_server_entry(host_app: str, config_name: str, entry: dict[str, Any], s
     )
 
 
+def _iter_raw_entries(schema: str, data: dict[str, Any], source_path: str) -> tuple[list[tuple[str, Any]], list[str]]:
+    """Yields (config_name, raw_entry) pairs for every schema shape we know
+    about. Shared by parse_config_dict (builds MCPServerConfig) and
+    extract_raw_entries (returns the raw dict verbatim, secrets included) so
+    the two can never disagree about which servers a config file declares.
+
+    A top-level "projects" dict (Claude Code's user-scoped ~/.claude.json:
+    {"projects": {"<abs project path>": {"mcpServers": {...}}}}) is detected
+    from the data itself, not from `schema` - a location built for a known
+    host app (see discovery/config_locations.py) can supply the right
+    `schema` up front, but `--config <arbitrary path>` cannot, so this can't
+    depend on the caller having already guessed the file's shape.
+    """
+    warnings: list[str] = []
+    pairs: list[tuple[str, Any]] = []
+
+    projects = data.get("projects")
+    if isinstance(projects, dict):
+        for project_path, project_data in projects.items():
+            if not isinstance(project_data, dict):
+                continue
+            raw_servers = project_data.get("mcpServers")
+            if raw_servers is None:
+                continue
+            if not isinstance(raw_servers, dict):
+                warnings.append(f"{source_path}: project '{project_path}' mcpServers is not an object, skipping")
+                continue
+            for name, entry in raw_servers.items():
+                pairs.append((f"{project_path}::{name}", entry))
+
+    top_level_key = "servers" if schema == "servers" else "mcpServers"
+    raw_servers = data.get(top_level_key)
+    if isinstance(raw_servers, dict):
+        for name, entry in raw_servers.items():
+            pairs.append((str(name), entry))
+    elif raw_servers is not None:
+        warnings.append(f"{source_path}: '{top_level_key}' is not an object, skipping")
+
+    return pairs, warnings
+
+
 def parse_config_dict(host_app: str, schema: str, data: dict[str, Any], source_path: str) -> tuple[list[MCPServerConfig], list[str]]:
     """Returns (servers, warnings). Never raises on malformed per-entry data -
     one bad server entry in a host's config shouldn't blind the scan to every
     other server declared alongside it."""
 
-    warnings: list[str] = []
     servers: list[MCPServerConfig] = []
+    pairs, warnings = _iter_raw_entries(schema, data, source_path)
 
-    top_level_key = "servers" if schema == "servers" else "mcpServers"
-    raw_servers = data.get(top_level_key)
-    if raw_servers is None:
-        return servers, warnings
-    if not isinstance(raw_servers, dict):
-        warnings.append(f"{source_path}: '{top_level_key}' is not an object, skipping")
-        return servers, warnings
-
-    for name, entry in raw_servers.items():
+    for config_name, entry in pairs:
         if not isinstance(entry, dict):
-            warnings.append(f"{source_path}: server '{name}' entry is not an object, skipping")
+            warnings.append(f"{source_path}: server '{config_name}' entry is not an object, skipping")
             continue
         if entry.get("disabled") is True:
             continue
         try:
-            servers.append(parse_server_entry(host_app, str(name), entry, source_path))
+            servers.append(parse_server_entry(host_app, config_name, entry, source_path))
         except Exception as exc:  # noqa: BLE001 - one malformed entry must not abort the scan
-            warnings.append(f"{source_path}: failed to parse server '{name}': {exc}")
+            warnings.append(f"{source_path}: failed to parse server '{config_name}': {exc}")
 
     return servers, warnings
 
@@ -134,11 +167,8 @@ def extract_raw_entries(location: ConfigLocation) -> dict[str, dict[str, Any]]:
         return {}
     if not isinstance(data, dict):
         return {}
-    top_level_key = "servers" if location.schema == "servers" else "mcpServers"
-    raw_servers = data.get(top_level_key)
-    if not isinstance(raw_servers, dict):
-        return {}
-    return {str(name): entry for name, entry in raw_servers.items() if isinstance(entry, dict)}
+    pairs, _ = _iter_raw_entries(location.schema, data, str(location.path))
+    return {name: entry for name, entry in pairs if isinstance(entry, dict)}
 
 
 def load_config_files(locations: list[ConfigLocation]) -> tuple[list[MCPServerConfig], list[str]]:

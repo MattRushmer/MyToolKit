@@ -49,8 +49,11 @@ def known_config_locations(cwd: Path | None = None) -> list[ConfigLocation]:
     else:
         locations.append(ConfigLocation("claude-desktop", _home() / ".config" / "Claude" / "claude_desktop_config.json"))
 
-    # Claude Code: user-scoped (~/.claude.json) and project-scoped (.mcp.json)
-    locations.append(ConfigLocation("claude-code-user", _home() / ".claude.json"))
+    # Claude Code: user-scoped (~/.claude.json) and project-scoped (.mcp.json).
+    # The user-scoped file nests servers per project - {"projects": {"<abs
+    # path>": {"mcpServers": {...}}}} - not a top-level "mcpServers" key, so
+    # it gets its own schema (see parser.py's claude_code_projects handling).
+    locations.append(ConfigLocation("claude-code-user", _home() / ".claude.json", schema="claude_code_projects"))
     locations.append(ConfigLocation("claude-code-project", cwd / ".mcp.json"))
 
     # Cursor: user-scoped and project-scoped
