@@ -32,7 +32,7 @@ REDACTED_PLACEHOLDER = "<redacted-by-mcp-sentinel>"
 # "id_token", etc. Substring matching over-redacts occasionally (e.g. a
 # "--keyword" flag) - that's the intended, accepted tradeoff for a mechanism
 # whose failure mode must be "redacts too much," never "leaks a credential."
-_SECRET_KEYWORDS = re.compile(r"(api[-_]?key|token|passwd|password|secret|credential|auth)", re.IGNORECASE)
+_SECRET_KEYWORDS = re.compile(r"(api[-_]?key|token|passwd|password|secret|credential|auth|bearer)", re.IGNORECASE)
 # A bare value that looks like an opaque credential regardless of context
 # (long run of token-safe characters) - redacted defensively even without a
 # preceding flag name, since some servers take a credential as a positional arg.

@@ -90,10 +90,19 @@ and has **no override flag**:
   only successful responses are analyzed.
 
 Credential handling: `MCPServerConfig` - the type that ends up in every
-report and baseline file - only ever carries auth *presence* (a bool) and
-env var *names*, never real header/env values. Real values are re-read
-separately and transiently, purely to open a live connection, and are never
-attached to anything that gets serialized to disk.
+report and baseline file - never carries a real credential value. `env`
+values become `env_var_names` (names only); `headers` presence becomes a
+bool (`has_auth_header`); and anything in `args`/`url` that looks like a
+credential (a recognized flag name, a query param, HTTP Basic-auth
+userinfo, an OAuth-style fragment, or a long opaque bare value) is replaced
+with a placeholder at parse time (`discovery/parser.py`'s `_redact_args`/
+`_redact_url`), with just the matched flag *name* kept as a signal
+(`secret_like_arg_flags`). The real, unredacted values needed to actually
+open a live connection are re-read separately and transiently
+(`extract_raw_entries`) and threaded straight through to the connector -
+never through `MCPServerConfig`, and never attached to anything that gets
+serialized to disk. This is pattern-based, not a hard guarantee - see Known
+limitations below.
 
 ## Setup
 
@@ -161,6 +170,18 @@ exists purely to demonstrate and test detection.
 - **No override for probing non-read-only tools.** This is deliberate (see
   Safety model above), but it means a destructive or unannotated tool's live
   behavior can only be assessed manually.
+- **Credential redaction is pattern-based, not a guarantee.** `args`/`url`
+  values that look like a credential (a recognized flag name like
+  `--api-key`/`--bearer`, a query param like `token=`/`client_secret=`, HTTP
+  Basic-auth userinfo, or a long opaque bare value) are redacted before
+  anything is persisted to a report or baseline - see the Safety model
+  section above. This substantially reduces but cannot guarantee zero
+  leakage for every possible credential shape: a secret shorter than 16
+  characters with no recognized flag name preceding it, or passed via a
+  flag name this tool doesn't recognize as credential-shaped, can still
+  appear in a report's `args`/`url` fields. Treat `--out-json`/`--out-markdown`
+  reports as sensitive by default, the same as you would the config files
+  they were generated from.
 
 ## Project layout
 

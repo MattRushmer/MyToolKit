@@ -39,6 +39,14 @@ def test_secret_flag_and_following_value_are_redacted_in_args():
     assert "sk_live_51H8x9zK2example" not in repr(s)
 
 
+def test_bearer_flag_is_recognized_as_secret_like():
+    data = {"mcpServers": {"x": {"command": "python", "args": ["--bearer", "REALVALUE1234567890ABCDEF"]}}}
+    servers, _ = parse_config_dict("cline", "mcpServers", data, "/fake/cline.json")
+    s = servers[0]
+    assert s.secret_like_arg_flags == ("--bearer",)
+    assert "REALVALUE1234567890ABCDEF" not in repr(s)
+
+
 def test_inline_flag_equals_value_form_is_redacted():
     # Regression test: --flag=value (one array entry) is a common alternate
     # CLI convention to --flag value (two entries). A round-2 security review
