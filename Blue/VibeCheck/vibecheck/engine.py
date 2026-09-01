@@ -24,7 +24,7 @@ from vibecheck.dependencies.findings import build_dependency_findings
 from vibecheck.dependencies.registry import check_dependencies_exist
 from vibecheck.duplication.duplication import cluster_duplicate_insecure_findings
 from vibecheck.llm.client import AuthJudgeVerdict, judge_auth_finding
-from vibecheck.models import Category, Finding, Language, ScanReport, Severity, SourceFile
+from vibecheck.models import Category, Finding, Language, ScanReport, SourceFile
 from vibecheck.rules.crypto_and_config import check_crypto_and_config
 from vibecheck.rules.dangerous_calls import check_dangerous_calls
 from vibecheck.rules.injection import check_injection
@@ -103,12 +103,16 @@ def _apply_llm_judge(findings: list[Finding], sources_by_path: dict[str, SourceF
 
         evidence = dict(finding.evidence)
         evidence["llm_verdict"] = {"is_real_vulnerability": verdict.is_real_vulnerability, "confidence": verdict.confidence, "reasoning": verdict.reasoning}
-        severity = finding.severity
         title = finding.title
         if not verdict.is_real_vulnerability and verdict.confidence >= _LLM_FALSE_POSITIVE_CONFIDENCE_THRESHOLD:
-            severity = Severity.LOW
             title = f"[LLM judge: likely false positive] {finding.title}"
-        judged.append(dataclasses.replace(finding, evidence=evidence, severity=severity, title=title))
+        # Severity is deliberately left untouched: the judge reasons over source
+        # from the scanned (untrusted) repository, so treating its opinion as
+        # authoritative enough to lower severity would let a prompt-injection
+        # attempt in that source silently downgrade a real finding below a
+        # --fail-on threshold. The verdict is surfaced for a human to read
+        # (evidence + title), never used to change what CI gates on.
+        judged.append(dataclasses.replace(finding, evidence=evidence, title=title))
     return judged, warnings
 
 
