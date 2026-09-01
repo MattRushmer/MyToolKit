@@ -35,6 +35,23 @@ def test_parses_pep621_pyproject_dependencies(tmp_path: Path):
     assert names == {"requests", "totally-fake-package"}
 
 
+def test_parses_poetry_dependencies_section(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\n'
+        'name = "demo"\n\n'
+        '[tool.poetry.dependencies]\n'
+        'python = "^3.10"\n'
+        'requests = "^2.0"\n'
+        'totally-fake-poetry-package = "^1.0"\n\n'
+        '[tool.poetry.dev-dependencies]\n'
+        'pytest = "^7.0"\n'
+    )
+    deps = extract_declared_dependencies(tmp_path)
+    names = {d.name for d in deps}
+    assert names == {"requests", "totally-fake-poetry-package", "pytest"}
+    assert "python" not in names
+
+
 def test_parses_package_json_dependencies(tmp_path: Path):
     (tmp_path / "package.json").write_text(
         '{"dependencies": {"express": "^4.18.0", "local-lib": "file:../local-lib"}, '

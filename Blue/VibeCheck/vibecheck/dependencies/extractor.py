@@ -8,10 +8,12 @@ implies (an import with no manifest entry is invisible to this check).
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
 from vibecheck.dependencies.models import DeclaredDependency
+from vibecheck.scanner.walker import is_excluded_dir_name
 
 _REQUIREMENTS_NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 _UNCHECKABLE_VERSION_PREFIXES = ("file:", "link:", "workspace:", "git+", "git:", "http:", "https:", ".", "/", "*")
@@ -44,7 +46,7 @@ def _parse_requirements_txt(path: Path, rel_path: str) -> list[DeclaredDependenc
 # formatting (inline tables, multi-line strings with brackets, etc.).
 _PEP621_DEPS_BLOCK_RE = re.compile(r"dependencies\s*=\s*\[(.*?)\]", re.DOTALL)
 _QUOTED_ITEM_RE = re.compile(r"""["']([^"']+)["']""")
-_POETRY_SECTION_RE = re.compile(r"\[tool\.poetry(?:\.dev)?-?dependencies\]\s*(.*?)(?=\n\[|\Z)", re.DOTALL)
+_POETRY_SECTION_RE = re.compile(r"\[tool\.poetry\.(?:dev-)?dependencies\]\s*(.*?)(?=\n\[|\Z)", re.DOTALL)
 _POETRY_LINE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=", re.MULTILINE)
 
 
@@ -80,7 +82,7 @@ def _parse_pyproject_toml(path: Path, rel_path: str) -> list[DeclaredDependency]
 def _parse_package_json(path: Path, rel_path: str) -> list[DeclaredDependency]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, RecursionError):
         return []
 
     deps: list[DeclaredDependency] = []
@@ -103,11 +105,24 @@ _PARSERS = {
 
 
 def extract_declared_dependencies(root: Path) -> list[DeclaredDependency]:
+    """Manifest files are matched by name via a symlink-hostile `os.walk`
+    (mirroring `scanner/walker.py` - see its docstring for why: a symlinked
+    manifest could otherwise pull an out-of-tree file's content into a
+    dependency finding)."""
     root = root.resolve()
     deps: list[DeclaredDependency] = []
-    for filename, parser in _PARSERS.items():
-        for path in root.rglob(filename):
-            if "node_modules" in path.parts or ".venv" in path.parts or "venv" in path.parts:
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dir_path = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if not is_excluded_dir_name(d) and not (dir_path / d).is_symlink()]
+
+        for filename in filenames:
+            parser = _PARSERS.get(filename)
+            if parser is None:
+                continue
+            path = dir_path / filename
+            if path.is_symlink():
                 continue
             deps.extend(parser(path, path.relative_to(root).as_posix()))
+
     return deps
