@@ -25,11 +25,18 @@ class SymbolIndex:
     defined_names: frozenset[str]
     referenced_names: frozenset[str]
     function_defs: tuple[FunctionDef, ...] = field(default_factory=tuple)
+    # Files containing `from x import *`: a name that "isn't defined anywhere
+    # we can see" might still come from the star-import's target module,
+    # which we have no way to resolve. VIBE-AUTH-01 skips guards in these
+    # files rather than risk a false "hallucinated" verdict.
+    star_import_files: frozenset[str] = field(default_factory=frozenset)
 
 
 def _import_bindings(node: ast.Import | ast.ImportFrom) -> list[str]:
     bindings = []
     for alias in node.names:
+        if alias.name == "*":
+            continue  # handled separately via star_import_files - "*" is not a real binding
         if alias.asname:
             bindings.append(alias.asname)
         else:
@@ -41,6 +48,7 @@ def build_python_symbol_index(sources: list[SourceFile]) -> SymbolIndex:
     defined: set[str] = set()
     referenced: set[str] = set()
     function_defs: list[FunctionDef] = []
+    star_import_files: set[str] = set()
 
     trees: list[tuple[SourceFile, ast.Module]] = []
     for source in sources:
@@ -58,14 +66,27 @@ def build_python_symbol_index(sources: list[SourceFile]) -> SymbolIndex:
                 function_defs.append(FunctionDef(file=source.rel_path, line=node.lineno, name=node.name))
             elif isinstance(node, ast.ClassDef):
                 defined.add(node.name)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            elif isinstance(node, ast.ImportFrom):
+                if any(alias.name == "*" for alias in node.names):
+                    star_import_files.add(source.rel_path)
                 defined.update(_import_bindings(node))
+            elif isinstance(node, ast.Import):
+                defined.update(_import_bindings(node))
+            elif isinstance(node, ast.Assign):
+                # covers the `require_admin = make_role_guard("admin")` decorator-factory
+                # pattern - a plain function/class def is not the only way to "define" a guard.
+                defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                defined.add(node.target.id)
             elif isinstance(node, ast.Name):
                 referenced.add(node.id)
             elif isinstance(node, ast.Attribute):
                 referenced.add(node.attr)
 
-    return SymbolIndex(defined_names=frozenset(defined), referenced_names=frozenset(referenced), function_defs=tuple(function_defs))
+    return SymbolIndex(
+        defined_names=frozenset(defined), referenced_names=frozenset(referenced),
+        function_defs=tuple(function_defs), star_import_files=frozenset(star_import_files),
+    )
 
 
 _JS_DEFINED_RE_PARTS = (
@@ -78,12 +99,14 @@ _JS_DEFINED_RE_PARTS = (
 
 
 def build_javascript_symbol_index(sources: list[SourceFile]) -> SymbolIndex:
+    """`referenced_names` is left empty here: the only consumer,
+    check_unused_auth_helpers, is Python-only (see README's Known
+    limitations), so scanning every JS/TS line for identifier references
+    would be pure wasted work with nothing reading the result."""
     import re
 
     defined: set[str] = set()
-    referenced: set[str] = set()
     combined_defined_re = re.compile("|".join(_JS_DEFINED_RE_PARTS))
-    identifier_re = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
     for source in sources:
         if source.language not in (Language.JAVASCRIPT, Language.TYPESCRIPT):
@@ -97,7 +120,5 @@ def build_javascript_symbol_index(sources: list[SourceFile]) -> SymbolIndex:
                         name = name.strip().split(" as ")[-1].strip()
                         if name:
                             defined.add(name)
-            for name in identifier_re.findall(line):
-                referenced.add(name)
 
-    return SymbolIndex(defined_names=frozenset(defined), referenced_names=frozenset(referenced))
+    return SymbolIndex(defined_names=frozenset(defined), referenced_names=frozenset())

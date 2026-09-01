@@ -60,7 +60,11 @@ def _resolved_call_name(node: ast.expr) -> str:
 def check_undefined_guards(routes: list[RouteInfo], symbol_index: SymbolIndex) -> list[Finding]:
     findings: list[Finding] = []
     for route in routes:
+        if route.file in symbol_index.star_import_files:
+            continue  # a `from x import *` in this file could resolve any bare name - can't safely flag
         for name in route.bare_guard_names:
+            if not _AUTH_GUARD_NAME_RE.search(name):
+                continue  # e.g. @retry, @rate_limited - not an auth claim, not this rule's business
             if name in _KNOWN_FRAMEWORK_GUARDS or name in symbol_index.defined_names:
                 continue
             findings.append(Finding(
@@ -243,7 +247,7 @@ def check_sibling_route_gaps(routes: list[RouteInfo]) -> list[Finding]:
         groups.setdefault((route.file, prefix), []).append(route)
 
     findings: list[Finding] = []
-    for (file, prefix), group in groups.items():
+    for (_file, prefix), group in groups.items():
         if len(group) < 2:
             continue
         guarded = [r for r in group if any(_AUTH_GUARD_NAME_RE.search(g) for g in r.guard_names)]

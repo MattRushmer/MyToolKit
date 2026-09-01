@@ -52,6 +52,56 @@ def test_defined_decorator_is_not_flagged():
     assert findings == []
 
 
+def test_undefined_non_auth_decorator_is_not_flagged():
+    source = make_source(
+        """
+        @app.route("/report")
+        @retry
+        @rate_limited
+        def report():
+            return generate_report()
+        """
+    )
+    routes = extract_python_routes(source)
+    index = build_python_symbol_index([source])
+    findings = check_undefined_guards(routes, index)
+    assert findings == []
+
+
+def test_decorator_factory_assignment_is_recognized_as_defined():
+    source = make_source(
+        """
+        require_admin = make_role_guard("admin")
+
+        @app.route("/admin")
+        @require_admin
+        def admin_panel():
+            return "ok"
+        """
+    )
+    routes = extract_python_routes(source)
+    index = build_python_symbol_index([source])
+    findings = check_undefined_guards(routes, index)
+    assert findings == []
+
+
+def test_star_import_file_suppresses_undefined_guard_check():
+    source = make_source(
+        """
+        from myapp.decorators import *
+
+        @app.route("/admin")
+        @require_admin
+        def admin_panel():
+            return "ok"
+        """
+    )
+    routes = extract_python_routes(source)
+    index = build_python_symbol_index([source])
+    findings = check_undefined_guards(routes, index)
+    assert findings == []
+
+
 def test_known_framework_guard_is_not_flagged():
     source = make_source(
         """
