@@ -42,7 +42,8 @@ def _route_path(call: ast.Call) -> str:
 
 
 def _route_method(call: ast.Call) -> str:
-    attr = call.func.attr  # type: ignore[union-attr]
+    assert isinstance(call.func, ast.Attribute)  # guaranteed by _is_route_decorator before this is called
+    attr = call.func.attr
     if attr != "route":
         return attr.upper()
     methods_kw = next((kw for kw in call.keywords if kw.arg == "methods"), None)
@@ -105,7 +106,7 @@ _JS_ROUTE_CALL_RE = re.compile(
 def _split_top_level_args(text: str) -> list[str]:
     args: list[str] = []
     depth = 0
-    current = []
+    current: list[str] = []
     for ch in text:
         if ch in "([{":
             depth += 1

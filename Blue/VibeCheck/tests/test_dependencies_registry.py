@@ -47,7 +47,7 @@ class _OfflineClient:
 
 def test_existing_package_resolves_true(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     call_log: list[str] = []
-    monkeypatch.setattr(registry, "httpx", type("M", (), {"Client": lambda **kw: _FakeClient({"requests": 200}, call_log)}))
+    monkeypatch.setattr(registry.httpx, "Client", lambda **kw: _FakeClient({"requests": 200}, call_log))
     deps = [DeclaredDependency(name="requests", ecosystem="pypi", manifest_file="requirements.txt", line=1)]
     results = check_dependencies_exist(deps, tmp_path)
     assert results[("pypi", "requests")].exists is True
@@ -55,14 +55,14 @@ def test_existing_package_resolves_true(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 def test_hallucinated_package_resolves_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     call_log: list[str] = []
-    monkeypatch.setattr(registry, "httpx", type("M", (), {"Client": lambda **kw: _FakeClient({"totally-fake-package": 404}, call_log)}))
+    monkeypatch.setattr(registry.httpx, "Client", lambda **kw: _FakeClient({"totally-fake-package": 404}, call_log))
     deps = [DeclaredDependency(name="totally-fake-package", ecosystem="pypi", manifest_file="requirements.txt", line=1)]
     results = check_dependencies_exist(deps, tmp_path)
     assert results[("pypi", "totally-fake-package")].exists is False
 
 
 def test_offline_degrades_to_unknown_without_raising(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    monkeypatch.setattr(registry, "httpx", type("M", (), {"Client": lambda **kw: _OfflineClient()}))
+    monkeypatch.setattr(registry.httpx, "Client", lambda **kw: _OfflineClient())
     deps = [DeclaredDependency(name="requests", ecosystem="pypi", manifest_file="requirements.txt", line=1)]
     results = check_dependencies_exist(deps, tmp_path)
     assert results[("pypi", "requests")].exists is None
@@ -70,7 +70,7 @@ def test_offline_degrades_to_unknown_without_raising(monkeypatch: pytest.MonkeyP
 
 def test_second_call_within_ttl_uses_cache_not_network(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     call_log: list[str] = []
-    monkeypatch.setattr(registry, "httpx", type("M", (), {"Client": lambda **kw: _FakeClient({"requests": 200}, call_log)}))
+    monkeypatch.setattr(registry.httpx, "Client", lambda **kw: _FakeClient({"requests": 200}, call_log))
     deps = [DeclaredDependency(name="requests", ecosystem="pypi", manifest_file="requirements.txt", line=1)]
 
     check_dependencies_exist(deps, tmp_path)

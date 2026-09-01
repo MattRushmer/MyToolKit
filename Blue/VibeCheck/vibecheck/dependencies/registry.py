@@ -13,6 +13,7 @@ from an error, or this would be worse than useless as a supply-chain check.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from vibecheck.dependencies.models import DeclaredDependency
 
 _CACHE_FILENAME = "dependency_registry_cache.json"
 _DEFAULT_TTL_SECONDS = 24 * 60 * 60
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -88,7 +90,8 @@ def check_dependencies_exist(
                     key = (dep.ecosystem, dep.name)
                     results[key] = RegistryCheckResult(dep.name, dep.ecosystem, exists)
                     cache[f"{dep.ecosystem}:{dep.name}"] = {"exists": exists, "checked_at": now}
-        except Exception:  # noqa: BLE001 - any client-construction-level failure must not sink the whole scan
+        except Exception as exc:  # noqa: BLE001 - any client-construction-level failure must not sink the whole scan
+            _LOGGER.warning("dependency registry batch failed (%s); %d package(s) degraded to unknown", exc, len(to_query))
             for dep in to_query:
                 key = (dep.ecosystem, dep.name)
                 if key not in results:
