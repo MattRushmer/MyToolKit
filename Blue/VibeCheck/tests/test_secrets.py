@@ -39,3 +39,23 @@ def test_does_not_flag_short_value():
     source = make_source('password = "abc123"\n')
     findings = check_secrets(source)
     assert findings == []
+
+
+def test_vendor_key_never_appears_raw_in_snippet_or_evidence():
+    raw_secret = "AKIAABCDEFGHIJKLMNOP"
+    source = make_source(f'AWS_KEY = "{raw_secret}"\n')
+    findings = check_secrets(source)
+    assert findings, "expected at least one finding"
+    for finding in findings:
+        assert raw_secret not in finding.snippet
+        assert raw_secret not in str(finding.evidence)
+
+
+def test_generic_credential_value_never_appears_raw_in_snippet_or_evidence():
+    raw_secret = "Xk9mQ2vRz8Lp4Wn7Ht3F"
+    source = make_source(f'db_password = "{raw_secret}"\n')
+    findings = check_secrets(source)
+    assert findings, "expected at least one finding"
+    for finding in findings:
+        assert raw_secret not in finding.snippet
+        assert raw_secret not in str(finding.evidence)

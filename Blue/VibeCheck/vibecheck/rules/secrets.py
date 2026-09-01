@@ -47,6 +47,20 @@ _PLACEHOLDER_MARKERS = (
 _ENV_LOOKUP_HINTS = ("os.environ", "os.getenv", "process.env", "getenv(")
 
 
+def _redact_value(value: str, keep: int = 4) -> str:
+    """Never let the real secret value reach a Finding - not in `evidence`,
+    and not in `snippet` either (both get serialized verbatim into
+    --out-json/--out-markdown reports users commit, share, or upload as CI
+    artifacts, so a scan that finds a live key must not re-publish it)."""
+    if len(value) <= keep * 2:
+        return "*" * len(value)
+    return f"{value[:keep]}{'*' * (len(value) - keep * 2)}{value[-keep:]}"
+
+
+def _mask_span(line: str, start: int, end: int) -> str:
+    return line[:start] + _redact_value(line[start:end]) + line[end:]
+
+
 def _shannon_entropy(value: str) -> float:
     if not value:
         return 0.0
@@ -72,7 +86,11 @@ def check_secrets(source: SourceFile) -> list[Finding]:
         for label, pattern, severity in _VENDOR_KEY_PATTERNS:
             match = pattern.search(line)
             if match:
-                findings.append(_make_finding(source, line_no, line, severity, f"Hardcoded {label} detected", matched=match.group(0)))
+                masked_line = _mask_span(line, match.start(), match.end())
+                findings.append(_make_finding(
+                    source, line_no, masked_line, severity, f"Hardcoded {label} detected",
+                    matched=_redact_value(match.group(0)),
+                ))
 
         for match in _ASSIGNMENT_RE.finditer(line):
             var_name, value = match.group(1), match.group(2)
@@ -80,9 +98,10 @@ def check_secrets(source: SourceFile) -> list[Finding]:
                 continue
             entropy = _shannon_entropy(value)
             severity = Severity.HIGH if entropy >= 3.5 else Severity.MEDIUM
+            masked_line = _mask_span(line, match.start(2), match.end(2))
             findings.append(
                 _make_finding(
-                    source, line_no, line, severity,
+                    source, line_no, masked_line, severity,
                     f"Hardcoded credential-like value assigned to '{var_name}'",
                     matched=f"{var_name} = <redacted, entropy {entropy:.1f}>",
                 )
@@ -91,7 +110,9 @@ def check_secrets(source: SourceFile) -> list[Finding]:
     return findings
 
 
-def _make_finding(source: SourceFile, line_no: int, line: str, severity: Severity, title: str, matched: str) -> Finding:
+def _make_finding(source: SourceFile, line_no: int, masked_line: str, severity: Severity, title: str, matched: str) -> Finding:
+    """`masked_line` and `matched` must already have the real secret value
+    redacted by the caller - see `_redact_value`/`_mask_span`."""
     return Finding(
         finding_id=f"{VIBE_SEC_HARDCODED_SECRET}:{source.rel_path}:{line_no}",
         rule_id=VIBE_SEC_HARDCODED_SECRET,
@@ -105,7 +126,7 @@ def _make_finding(source: SourceFile, line_no: int, line: str, severity: Severit
         ),
         file=source.rel_path,
         line=line_no,
-        snippet=line.strip()[:200],
+        snippet=masked_line.strip()[:200],
         evidence={"matched": matched},
         recommendation="Move this value to an environment variable or secret manager, rotate it (assume it is already compromised if this was ever pushed), and add it to .gitignore/.env handling.",
         references=(CWE_798_HARDCODED_CREDENTIALS, OWASP_A02_CRYPTO_FAILURES),
