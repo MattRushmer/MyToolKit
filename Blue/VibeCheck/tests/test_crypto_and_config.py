@@ -59,6 +59,12 @@ def test_flags_wildcard_cors_alone_as_medium():
     assert hit.severity == "medium"
 
 
+def test_flags_wildcard_cors_in_list_form():
+    source = make_source('CORS(app, resources={r"/*": {"origins": ["*"]}})\n')
+    findings = check_crypto_and_config(source)
+    assert any(f.rule_id == VIBE_SEC_PERMISSIVE_CORS for f in findings)
+
+
 def test_does_not_flag_specific_cors_origin():
     source = make_source("response.headers['Access-Control-Allow-Origin'] = 'https://example.com'\n")
     findings = check_crypto_and_config(source)

@@ -40,7 +40,7 @@ def build_dependency_findings(deps: list[DeclaredDependency], results: dict[tupl
                 line=dep.line,
                 snippet=dep.name,
                 evidence={"name": dep.name, "ecosystem": dep.ecosystem},
-                recommendation=f"Confirm the intended package name (check for a typo or a similarly-named real package) before this is ever installed in an environment with network access.",
+                recommendation="Confirm the intended package name (check for a typo or a similarly-named real package) before this is ever installed in an environment with network access.",
                 references=(CWE_1357_SUPPLY_CHAIN, OWASP_A08_SOFTWARE_DATA_INTEGRITY_FAILURES),
             ))
         elif result.exists is None:

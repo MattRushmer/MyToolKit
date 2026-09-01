@@ -33,7 +33,7 @@ _TLS_DISABLED_RE = re.compile(
 
 _CORS_WILDCARD_RE = re.compile(
     r"Access-Control-Allow-Origin[^=:,\n]{0,10}[:=,]\s*['\"]\*['\"]"
-    r"|origins\s*[:=]\s*['\"]\*['\"]"
+    r"|origins['\"]?\s*[:=]\s*\[?\s*['\"]\*['\"]"
 )
 _CORS_CREDENTIALS_RE = re.compile(
     r"Access-Control-Allow-Credentials[^=:,\n]{0,10}[:=,]\s*['\"]?true['\"]?"
