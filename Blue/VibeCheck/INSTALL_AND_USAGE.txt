@@ -1,0 +1,84 @@
+================================================================================
+VIBECHECK - INSTALLATION AND USAGE GUIDE
+================================================================================
+
+WHAT THIS IS
+--------------------------------------------------------------------------------
+VibeCheck is a security reviewer purpose-built for AI-generated ("vibe-coded")
+code:
+
+  1. Baseline SAST rules tuned for what shows up in LLM-written code: hardcoded
+     secrets, eval/exec, shell/SQL injection, unsafe deserialization, disabled
+     TLS verification, permissive CORS, debug mode left on, weak password hashing
+  2. Hallucinated-auth detection: guard decorators that reference nothing real,
+     fail-open try/except auth checks, tautological auth conditions, unused
+     auth-looking helpers, and sibling routes missing a guard their neighbors have
+  3. Duplicate-insecure-pattern clustering across the whole codebase
+  4. Hallucinated ("slopsquatted") dependency detection against the real
+     PyPI/npm registry (opt-in, needs network)
+  5. An optional Claude-backed second opinion on auth findings (opt-in, needs
+     an API key)
+  6. A Rich terminal summary, plus JSON/Markdown export and CI severity gating
+
+================================================================================
+1. REQUIREMENTS
+================================================================================
+  - Python 3.10 or newer
+  - An Anthropic API key (optional - only used by --llm-judge)
+  - Internet access for the one-time setup step, and for --check-deps
+
+================================================================================
+2. INSTALLATION
+================================================================================
+Open a terminal in this folder (Blue/VibeCheck) and run:
+
+  Windows (PowerShell or Git Bash):
+  --------------------------------
+    python -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -e .
+
+  macOS/Linux:
+  --------------------------------
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -e .
+
+Then, optionally:
+
+    cp env.example .env
+    # edit .env and set ANTHROPIC_API_KEY=sk-ant-... if you want --llm-judge
+
+================================================================================
+3. USAGE
+================================================================================
+Activate the virtualenv, then:
+
+    vibecheck check-setup
+    vibecheck scan .
+    vibecheck scan . --check-deps
+    vibecheck scan . --llm-judge
+    vibecheck scan . --out-json report.json --out-markdown report.md
+    vibecheck scan . --fail-on high        (exit code 2 if any HIGH+ finding)
+
+================================================================================
+4. TRY IT WITHOUT A REAL TARGET
+================================================================================
+fixtures/vibe_demo_app/ is a small deliberately-vulnerable Flask app that plants
+one instance of every rule category this tool is built to catch. From the
+project root, with the virtualenv activated:
+
+    vibecheck scan fixtures/vibe_demo_app --check-deps
+
+Never deploy this fixture app.
+
+================================================================================
+5. RUNNING TESTS
+================================================================================
+    .venv\Scripts\python -m pytest          (Windows)
+    .venv/bin/python -m pytest              (macOS/Linux)
+
+The suite includes unit tests per rule module plus an end-to-end test that runs
+the real engine against fixtures/vibe_demo_app and asserts every planted rule
+category fires. No network calls are made by the test suite itself (the
+dependency-registry check is exercised with a fake HTTP client).
