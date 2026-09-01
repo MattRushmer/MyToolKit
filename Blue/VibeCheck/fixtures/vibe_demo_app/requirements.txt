@@ -1,0 +1,4 @@
+flask==3.0.0
+requests==2.31.0
+# VIBE-DEP-01: this package name does not exist on PyPI - a hallucinated dependency
+turbo-json-flattenizer-utils==1.0.0
