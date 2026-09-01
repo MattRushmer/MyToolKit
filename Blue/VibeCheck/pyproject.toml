@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibecheck"
+version = "0.1.0"
+description = "Security reviewer tuned for AI-generated (\"vibe-coded\") code: catches hallucinated auth checks, copy-pasted insecure patterns repeated across a codebase, and hallucinated/invented dependencies, on top of baseline SAST coverage relevant to LLM-written code."
+requires-python = ">=3.10"
+
+[project.scripts]
+vibecheck = "cli.main:app"
+
+[tool.setuptools]
+packages = [
+    "vibecheck",
+    "vibecheck.scanner",
+    "vibecheck.rules",
+    "vibecheck.auth",
+    "vibecheck.duplication",
+    "vibecheck.dependencies",
+    "vibecheck.llm",
+    "vibecheck.report",
+    "cli",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
