@@ -56,6 +56,15 @@ def build_transport(cfg: UpstreamConfig) -> Any:
         if not cfg.url:
             raise ValueError(f"upstream '{cfg.upstream_id}' is configured for http but has no url")
         if cfg.headers:
+            # httpx2, not httpx: the mcp/anthropic SDKs this project already
+            # depends on pull in httpx2 (Tom Christie's http{x,core}2 rewrite)
+            # as their own HTTP stack, so it's already a trusted transitive
+            # dependency, not a separately-chosen package - but pin the exact
+            # version in requirements.txt regardless (see M5 in the security
+            # review this comment accompanies), since this is the one code
+            # path that attaches real upstream bearer credentials (`cfg.headers`,
+            # e.g. `Authorization: Bearer ${GITHUB_MCP_TOKEN}` - see
+            # serve_config.py) to an outbound client.
             import httpx2
 
             return streamable_http_client(cfg.url, http_client=httpx2.AsyncClient(headers=cfg.headers, timeout=cfg.timeout_seconds))

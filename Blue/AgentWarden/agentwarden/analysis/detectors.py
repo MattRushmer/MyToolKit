@@ -26,8 +26,7 @@ async def would_exceed_blast_radius(store: Store, task_id: str, ceiling: int, ca
     analysis/blast_radius.py's docstring on why the reachable set includes
     denied attempts. Returns (would_exceed, current_distinct_upstreams) so
     the caller can build a detailed AuditEvent.detail without a second query."""
-    calls = await calls_store.list_calls_for_task(store, task_id)
-    current_upstreams = {c.upstream_server_id for c in calls}
+    current_upstreams = await calls_store.list_distinct_upstreams_for_task(store, task_id)
     projected = current_upstreams | {candidate_upstream_server_id}
     return len(projected) > ceiling, current_upstreams
 

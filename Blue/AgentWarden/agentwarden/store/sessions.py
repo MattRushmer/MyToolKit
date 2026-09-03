@@ -40,6 +40,7 @@ def _task_from_row(row: sqlite3.Row) -> Task:
         status=TaskStatus(row["status"]),
         opened_at=str_to_dt(row["opened_at"]),
         closed_at=opt_str_to_dt(row["closed_at"]),
+        blast_radius_ceiling=row["blast_radius_ceiling"],
     )
 
 
@@ -58,8 +59,12 @@ async def upsert_identity(store: Store, identity: Identity) -> None:
 async def create_task(store: Store, task: Task) -> None:
     def _run(conn: sqlite3.Connection) -> None:
         conn.execute(
-            "INSERT INTO tasks (task_id, root_session_id, identity_id, status, opened_at, closed_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (task.task_id, task.root_session_id, task.identity_id, task.status.value, dt_to_str(task.opened_at), opt_dt_to_str(task.closed_at)),
+            "INSERT INTO tasks (task_id, root_session_id, identity_id, status, opened_at, closed_at, blast_radius_ceiling) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                task.task_id, task.root_session_id, task.identity_id, task.status.value,
+                dt_to_str(task.opened_at), opt_dt_to_str(task.closed_at), task.blast_radius_ceiling,
+            ),
         )
         conn.commit()
 
@@ -129,6 +134,14 @@ async def close_session(store: Store, session_id: str, ended_at: str, reason: st
 async def list_active_sessions(store: Store) -> list[AgentSession]:
     def _run(conn: sqlite3.Connection) -> list[AgentSession]:
         rows = conn.execute("SELECT * FROM sessions WHERE status = ?", (SessionStatus.ACTIVE.value,)).fetchall()
+        return [_session_from_row(r) for r in rows]
+
+    return await store.run(_run)
+
+
+async def list_all_sessions(store: Store) -> list[AgentSession]:
+    def _run(conn: sqlite3.Connection) -> list[AgentSession]:
+        rows = conn.execute("SELECT * FROM sessions").fetchall()
         return [_session_from_row(r) for r in rows]
 
     return await store.run(_run)

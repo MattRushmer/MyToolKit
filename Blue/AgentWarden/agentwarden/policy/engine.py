@@ -20,7 +20,12 @@ def _normalize_posix_path(value: str) -> str:
     # Lexical only - no filesystem access, no symlink resolution (the real
     # containment guarantee is the upstream tool's own; this is a policy-layer
     # sanity check, documented as advisory in README's Known limitations).
-    return posixpath.normpath(value)
+    # Backslashes are normalized to `/` first: `posixpath.normpath` never
+    # treats `\` as a separator, so `..\..\..\etc` would otherwise sail
+    # through untouched and still pass a `startswith(boundary)` check here,
+    # while an upstream tool running on Windows (or handed the path via any
+    # API that accepts `\`) would still resolve those `..` segments for real.
+    return posixpath.normpath(value.replace("\\", "/"))
 
 
 def _is_path_within(value: str, boundary: str) -> bool:
@@ -29,9 +34,23 @@ def _is_path_within(value: str, boundary: str) -> bool:
     return norm_value == norm_boundary or norm_value.startswith(norm_boundary.rstrip("/") + "/")
 
 
+def _has_traversal_segment(value: str) -> bool:
+    """True if `value` contains a literal '..' path segment, `/`- or
+    `\\`-delimited. Used to make `prefix` traversal-safe independent of
+    policy/schema.py's field-name heuristic (H1 follow-up): that heuristic
+    only catches fields named like `path`/`file`/`dir`/`folder` - a field
+    named `location`/`target`/`cwd`/`workspace` using `prefix` on a path-ish
+    value got zero protection from it. Checking the value itself, not the
+    field name, closes the hole regardless of what the field happens to be
+    called. `prefix`'s legitimate non-path uses (e.g. a repo-name prefix like
+    "my-org/") have no legitimate reason to ever contain a '..' segment, so
+    this costs nothing for the cases `prefix` actually exists for."""
+    return ".." in value.replace("\\", "/").split("/")
+
+
 def _evaluate_one_constraint(constraint: ArgumentConstraint, value: object) -> bool:
     if constraint.prefix is not None:
-        return isinstance(value, str) and value.startswith(constraint.prefix)
+        return isinstance(value, str) and value.startswith(constraint.prefix) and not _has_traversal_segment(value)
     if constraint.path_within is not None:
         return isinstance(value, str) and _is_path_within(value, constraint.path_within)
     if constraint.in_ is not None:
@@ -54,6 +73,15 @@ def _check_constraints(rule: PolicyRule, arguments: dict[str, object]) -> tuple[
         value = arguments[field_name]
         redacted[field_name] = value
         if not _evaluate_one_constraint(constraint, value):
+            return False, redacted
+    if rule.strict:
+        # argument_constraints is otherwise just a named-field allow-list: a
+        # tool call carrying some extra argument the policy author never
+        # anticipated sails through untouched (see policy/schema.py's module
+        # docstring). `strict: true` closes that by fail-closed-rejecting any
+        # argument not explicitly named in this rule's constraints.
+        unexpected = sorted(set(arguments) - set(rule.argument_constraints))
+        if unexpected:
             return False, redacted
     return True, redacted
 

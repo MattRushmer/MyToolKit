@@ -28,7 +28,8 @@ DDL = (
         identity_id TEXT NOT NULL,
         status TEXT NOT NULL,
         opened_at TEXT NOT NULL,
-        closed_at TEXT
+        closed_at TEXT,
+        blast_radius_ceiling INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -126,4 +127,13 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         conn.execute(pragma)
     for statement in DDL:
         conn.execute(statement)
+    # `tasks.blast_radius_ceiling` was added after `CREATE TABLE IF NOT
+    # EXISTS` had already shipped, so it won't appear on a `tasks` table
+    # created by an older AgentWarden build. There's no real migration story
+    # yet (v1), but this one column is cheap and safe to backfill on open
+    # rather than silently breaking every pre-existing local state.db.
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN blast_radius_ceiling INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # column already present
     conn.commit()

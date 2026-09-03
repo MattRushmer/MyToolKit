@@ -37,27 +37,17 @@ SUB_SESSION_ID = "demo-sub-agent-session"
 
 
 def build_fixture_servers() -> dict[str, MCPServer]:
-    fs_server = MCPServer("fs-fixture")
-
-    @fs_server.tool()
-    def write_file(path: str, content: str) -> str:
-        return f"(simulated) wrote {len(content)} byte(s) to {path}"
-
-    github_server = MCPServer("github-fixture")
-
-    @github_server.tool()
-    def create_pr(repo: str, title: str, body: str) -> str:
-        return f"(simulated) opened PR '{title}' on {repo}"
-
-    @github_server.tool()
-    def merge_pr(repo: str, pr_number: int) -> str:
-        return f"(simulated) merged PR #{pr_number} on {repo}"
-
-    payments_server = MCPServer("payments-fixture")
-
-    @payments_server.tool()
-    def issue_refund(order_id: str, amount: float) -> str:
-        return f"(simulated) refunded {amount} for order {order_id}"
+    """Reuses the same three standalone fixture servers `fixtures/fs_server.py`
+    et al. also expose for a manual stdio demo, rather than redefining the
+    same tools inline a second time - two independent copies of e.g.
+    `write_file`'s behavior would silently drift if only one of them were
+    ever updated. Reusing the module-level `server` singletons here is safe:
+    it's the same "one MCPServer instance, many client sessions over its
+    lifetime" pattern proxy.mcp_server itself already relies on (see
+    proxy/server.py), not a new sharing risk."""
+    from fixtures.fs_server import server as fs_server
+    from fixtures.github_server import server as github_server
+    from fixtures.payments_server import server as payments_server
 
     return {"fs-mcp": fs_server, "github-mcp": github_server, "payments-mcp": payments_server}
 

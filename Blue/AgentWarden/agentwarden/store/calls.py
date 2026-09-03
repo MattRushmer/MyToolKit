@@ -59,6 +59,19 @@ async def list_calls_for_task(store: Store, task_id: str) -> list[ToolCallRecord
     return await store.run(_run)
 
 
+async def list_distinct_upstreams_for_task(store: Store, task_id: str) -> set[str]:
+    """Cheaper than `list_calls_for_task` when only the distinct-upstream set
+    is needed (analysis/detectors.py's blast-radius check, run on every single
+    `tools/call`) - avoids materializing every ToolCallRecord the task has
+    ever made just to throw away everything but one column."""
+
+    def _run(conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute("SELECT DISTINCT upstream_server_id FROM calls WHERE task_id = ?", (task_id,)).fetchall()
+        return {r["upstream_server_id"] for r in rows}
+
+    return await store.run(_run)
+
+
 async def list_calls_for_session(store: Store, session_id: str) -> list[ToolCallRecord]:
     def _run(conn: sqlite3.Connection) -> list[ToolCallRecord]:
         rows = conn.execute("SELECT * FROM calls WHERE session_id = ? ORDER BY started_at", (session_id,)).fetchall()

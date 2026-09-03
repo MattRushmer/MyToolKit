@@ -77,6 +77,7 @@ class EventType(str, Enum):
     DELEGATION_REJECTED = "delegation_rejected"
     GRANT_ISSUED = "grant_issued"
     TOOL_CALL_ALLOWED = "tool_call_allowed"
+    TOOL_CALL_ERROR = "tool_call_error"  # call was allowed by policy but the upstream dispatch itself failed
     POLICY_DENIED = "policy_denied"
     SCOPE_VIOLATION = "scope_violation"
     RATE_EXCEEDED = "rate_exceeded"
@@ -107,6 +108,12 @@ class Task:
     status: TaskStatus = TaskStatus.OPEN
     opened_at: datetime = field(default_factory=utcnow)
     closed_at: datetime | None = None
+    # The blast-radius ceiling actually enforced for this task's whole
+    # lifetime, captured once at task creation - a later CLI invocation of
+    # `blast-radius`/`review-task` reads this back instead of falling through
+    # to whatever AGENTWARDEN_BLAST_RADIUS_CEILING happens to be set to at
+    # report time, which has no relationship to what ran the task.
+    blast_radius_ceiling: int = 0
 
 
 @dataclass(frozen=True)
@@ -166,6 +173,13 @@ class PolicyRule:
     max_uses_per_task: int | None = None
     ttl_seconds: int = 60
     argument_constraints: dict[str, ArgumentConstraint] = field(default_factory=dict)
+    # If True, any call argument not named in argument_constraints is a
+    # SCOPE_VIOLATION - closes the "unnamed field sails through untouched"
+    # gap the allow-list shape otherwise has. Shallow only: this checks
+    # top-level argument names, not the contents of a nested dict/list value,
+    # so an allowed top-level key whose value is itself an object with an
+    # unconstrained sensitive subkey is not caught by strict mode alone.
+    strict: bool = False
 
 
 @dataclass(frozen=True)

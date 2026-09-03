@@ -41,10 +41,20 @@ from typing import Any
 
 import yaml
 
+from agentwarden.config import settings
 from agentwarden.models import ArgumentConstraint, PolicyRule
 
 _CONSTRAINT_KEYS = ("prefix", "path_within", "in", "lt", "gt", "eq")
 _MAX_TTL_SECONDS = 3600  # a security tool that can itself mint a day-long credential defeats its own purpose
+
+# Field names that almost certainly carry a filesystem path. `prefix` is a
+# raw, un-normalized `str.startswith()` (see policy/engine.py) with no
+# traversal protection at all - `/workspace/../../etc/passwd` satisfies
+# `prefix: "/workspace/"` outright. `path_within` is the only constraint that
+# normalizes and blocks `../` traversal, so a path-shaped field must use it;
+# refusing to load a policy that uses `prefix` on one of these fields turns a
+# silent directory-escape vulnerability into a load-time config error instead.
+_PATH_LIKE_FIELD_HINTS = ("path", "file", "dir", "folder")
 
 
 class PolicyValidationError(ValueError):
@@ -58,6 +68,11 @@ def _parse_constraint(field_name: str, raw: dict[str, Any]) -> ArgumentConstrain
     present = [k for k in _CONSTRAINT_KEYS if k in raw]
     if len(present) != 1:
         raise PolicyValidationError(f"argument_constraints.{field_name} must set exactly one of {_CONSTRAINT_KEYS}, got {present}")
+    if "prefix" in raw and any(hint in field_name.lower() for hint in _PATH_LIKE_FIELD_HINTS):
+        raise PolicyValidationError(
+            f"argument_constraints.{field_name} uses 'prefix', but '{field_name}' looks like a filesystem path "
+            "field - 'prefix' provides no traversal protection (no '../' handling). Use 'path_within' instead."
+        )
     kwargs: dict[str, Any] = {}
     if "prefix" in raw:
         kwargs["prefix"] = str(raw["prefix"])
@@ -83,7 +98,7 @@ def _parse_rule(identity_id: str, index: int, raw: dict[str, Any]) -> PolicyRule
         raise PolicyValidationError(f"argument_constraints for identity '{identity_id}' must be a mapping")
     constraints = {field_name: _parse_constraint(field_name, spec) for field_name, spec in constraints_raw.items()}
 
-    ttl_seconds = int(raw.get("ttl_seconds", 60))
+    ttl_seconds = int(raw.get("ttl_seconds", settings.default_ttl_seconds))
     if not (0 < ttl_seconds <= _MAX_TTL_SECONDS):
         raise PolicyValidationError(f"identity '{identity_id}' rule #{index}: ttl_seconds must be in (0, {_MAX_TTL_SECONDS}], got {ttl_seconds}")
 
@@ -101,6 +116,7 @@ def _parse_rule(identity_id: str, index: int, raw: dict[str, Any]) -> PolicyRule
         max_uses_per_task=int(max_uses) if max_uses is not None else None,
         ttl_seconds=ttl_seconds,
         argument_constraints=constraints,
+        strict=bool(raw.get("strict", False)),
     )
 
 

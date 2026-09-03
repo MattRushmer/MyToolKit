@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import typer
@@ -20,8 +21,44 @@ from agentwarden.store import grants as grants_store
 from agentwarden.store import sessions as sessions_store
 from agentwarden.store.connection import Store
 
+# A default Windows console uses a legacy codepage (cp1252) that can't encode
+# a lot of what audit/report text can legitimately contain (arbitrary tool
+# argument values, non-ASCII identity labels, ...). Reconfiguring to UTF-8
+# with a replace-on-error fallback means a print never crashes the CLI
+# outright over an encoding mismatch - it degrades to '?' instead. Must run
+# before `Console()` is constructed below, since Console captures sys.stdout
+# at construction time.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass  # not a reconfigurable text stream (e.g. captured by a test runner) - fine, just skip
+
 app = typer.Typer(help="Runtime credential broker and policy engine for AI-agent-held credentials over MCP.")
 console = Console()
+
+
+def _require_existing_db(db: Path) -> None:
+    """Read-only commands must not silently create a fresh, empty state file
+    for a mistyped --db path - sqlite3.connect() would otherwise happily do
+    that, and "0 events"/an empty table looks identical to "this really has
+    no data" for exactly the kind of user (incident response, an audit) who
+    most needs to know their query targeted the wrong file."""
+    if not db.exists():
+        console.print(f"[red]No such database file: {db}[/red]")
+        raise typer.Exit(1)
+
+
+async def _resolve_task_ceiling(store: Store, task_id: str) -> int:
+    """The ceiling actually enforced while a task ran is persisted on the Task
+    row (see Task.blast_radius_ceiling) - reading it back here is what makes
+    `blast-radius`/`review-task` agree with the audit log instead of silently
+    recomputing "exceeded" against whatever AGENTWARDEN_BLAST_RADIUS_CEILING
+    happens to be set to *now*, which has no relationship to what ran the
+    task. Falls back to the current config default only for a task that
+    genuinely isn't in this DB (e.g. a typo'd --task id)."""
+    task = await sessions_store.get_task(store, task_id)
+    return task.blast_radius_ceiling if task is not None else settings.blast_radius_ceiling
 
 _SEVERITY_STYLE = {Severity.CRITICAL: "bold red", Severity.HIGH: "red", Severity.MEDIUM: "yellow", Severity.LOW: "cyan", Severity.INFO: "dim"}
 
@@ -105,6 +142,8 @@ def audit(
     out_markdown: Path | None = typer.Option(None, "--out-markdown"),
 ) -> None:
     """Show the audit event log."""
+    _require_existing_db(db)
+
     async def _go():
         store = Store(db)
         await store.open()
@@ -128,7 +167,7 @@ def blast_radius_cmd(
     db: Path = typer.Option(..., "--db"),
     task: str | None = typer.Option(None, "--task"),
     session: str | None = typer.Option(None, "--session", help="Resolve to this session's task."),
-    ceiling: int = typer.Option(None, "--ceiling", help="Override the ceiling used to compute 'exceeded' (defaults to config)."),
+    ceiling: int | None = typer.Option(None, "--ceiling", help="Override the ceiling used to compute 'exceeded' (defaults to the ceiling actually enforced for this task)."),
     out_json: Path | None = typer.Option(None, "--out-json"),
     out_markdown: Path | None = typer.Option(None, "--out-markdown"),
 ) -> None:
@@ -138,6 +177,7 @@ def blast_radius_cmd(
     if task is None and session is None:
         console.print("[red]Pass --task or --session.[/red]")
         raise typer.Exit(1)
+    _require_existing_db(db)
 
     async def _go():
         store = Store(db)
@@ -149,7 +189,8 @@ def blast_radius_cmd(
                 console.print(f"[red]No such session: {session}[/red]")
                 raise typer.Exit(1)
             task_id = s.task_id
-        report = await compute_blast_radius(store, task_id, ceiling or settings.blast_radius_ceiling, SystemClock())
+        effective_ceiling = ceiling if ceiling is not None else await _resolve_task_ceiling(store, task_id)
+        report = await compute_blast_radius(store, task_id, effective_ceiling, SystemClock())
         console.print(render_blast_radius_markdown(report))
         if out_json:
             out_json.write_text(render_blast_radius_json(report), encoding="utf-8")
@@ -165,21 +206,16 @@ def blast_radius_cmd(
 @app.command("list-sessions")
 def list_sessions(db: Path = typer.Option(..., "--db"), active_only: bool = typer.Option(False, "--active")) -> None:
     """List sessions."""
+    _require_existing_db(db)
+
     async def _go():
         store = Store(db)
         await store.open()
-        sessions = await sessions_store.list_active_sessions(store) if active_only else []
-        if not active_only:
-            def _all(conn):
-                return conn.execute("SELECT session_id FROM sessions").fetchall()
-            rows = await store.run(_all)
-            sessions = [await sessions_store.get_session(store, r["session_id"]) for r in rows]
+        sessions = await (sessions_store.list_active_sessions(store) if active_only else sessions_store.list_all_sessions(store))
         table = Table(title="AgentWarden sessions")
         for column in ("Session", "Task", "Parent", "Status", "Started"):
             table.add_column(column)
         for s in sessions:
-            if s is None:
-                continue
             table.add_row(s.session_id, s.task_id, s.parent_session_id or "-", s.status.value, s.started_at.isoformat())
         console.print(table)
         await store.close()
@@ -190,6 +226,8 @@ def list_sessions(db: Path = typer.Option(..., "--db"), active_only: bool = type
 @app.command()
 def grants(db: Path = typer.Option(..., "--db"), session: str = typer.Option(..., "--session")) -> None:
     """Show every grant minted for one session."""
+    _require_existing_db(db)
+
     async def _go():
         store = Store(db)
         await store.open()
@@ -214,6 +252,7 @@ def revoke(
     if not session and not grant:
         console.print("[red]Pass --session or --grant.[/red]")
         raise typer.Exit(1)
+    _require_existing_db(db)
 
     async def _go():
         store = Store(db)
@@ -239,13 +278,15 @@ def review_task_cmd(db: Path = typer.Option(..., "--db"), task: str = typer.Opti
     if not settings.has_llm_key:
         console.print("[yellow]ANTHROPIC_API_KEY not set — nothing to do. See README.md.[/yellow]")
         raise typer.Exit(1)
+    _require_existing_db(db)
 
     async def _go():
         store = Store(db)
         await store.open()
         events = await audit_store.list_events(store)
         task_events = [e for e in events if e.task_id == task]
-        report = await compute_blast_radius(store, task, settings.blast_radius_ceiling, SystemClock())
+        effective_ceiling = await _resolve_task_ceiling(store, task)
+        report = await compute_blast_radius(store, task, effective_ceiling, SystemClock())
         await store.close()
 
         verdict = review_task(render_blast_radius_markdown(report), render_audit_events_markdown(task_events))
@@ -268,6 +309,18 @@ def serve(
     from agentwarden.proxy.server import AgentWardenProxy
     from agentwarden.proxy.upstream import UpstreamPool
     from agentwarden.serve_config import ServeConfigError, load_serve_config
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        # There is no transport-level authentication in front of the listener
+        # (see identity.py's docstring on v1's non-cryptographic identity
+        # binding, which is a separate gap from this one) - anything that can
+        # reach this host:port speaks for the identity configured in `config`
+        # with its full policy-granted trust, no additional credential asked.
+        console.print(
+            f"[yellow]Warning: binding to non-loopback host '{host}' exposes this identity's full policy-granted "
+            "trust to anything on the network that can reach this port - AgentWarden v1 has no transport-level "
+            "authentication in front of the listener. Put it behind your own auth/mTLS/network ACLs.[/yellow]"
+        )
 
     try:
         cfg = load_serve_config(config)

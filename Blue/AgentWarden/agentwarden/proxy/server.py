@@ -31,6 +31,8 @@ more strongly than the original plan did.
 """
 from __future__ import annotations
 
+import re
+import sqlite3
 from typing import Any
 
 from mcp.server.context import ServerRequestContext
@@ -67,6 +69,22 @@ _ALWAYS_PASSTHROUGH_METHODS = frozenset({
     "initialize", "server/discover",  # handshake - a client may use either depending on negotiated protocol version
     "notifications/initialized", "ping", "notifications/cancelled",
 })
+
+# Charset for client-asserted session_id/parentSessionId/taskId (H3 fix): these
+# strings are used verbatim as SQLite TEXT PRIMARY KEYs and are later
+# interpolated into Markdown reports wrapped in backticks (see
+# report/markdown_report.py). Left unvalidated, a crafted value could break
+# out of the Markdown code span to forge report structure, or - independent
+# of malice - two concurrent callers racing to claim the same never-before-seen
+# id could both pass the "does this exist yet" check before either INSERT
+# commits, surfacing as an unhandled sqlite3.IntegrityError instead of a clean
+# deny. Restricting to a small safe charset closes the injection angle
+# outright; the race is still handled below regardless of charset.
+_CLAIMED_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _is_valid_claimed_id(value: Any) -> bool:
+    return isinstance(value, str) and _CLAIMED_ID_PATTERN.match(value) is not None
 
 
 class AgentWardenProxy:
@@ -145,7 +163,7 @@ class AgentWardenProxy:
             root_session_id = session_id
             await sessions_store.create_task(self._store, Task(
                 task_id=resolution.task_id, root_session_id=root_session_id, identity_id=self._identity.identity_id,
-                status=TaskStatus.OPEN, opened_at=self._clock.now(),
+                status=TaskStatus.OPEN, opened_at=self._clock.now(), blast_radius_ceiling=self._blast_radius_ceiling,
             ))
         else:
             task = await sessions_store.get_task(self._store, resolution.task_id)
@@ -157,7 +175,41 @@ class AgentWardenProxy:
             parent_session_id=resolution.accepted_parent_session_id, started_at=self._clock.now(),
             last_activity_at=self._clock.now(),
         )
-        await sessions_store.create_session(self._store, session)
+        try:
+            await sessions_store.create_session(self._store, session)
+        except sqlite3.IntegrityError:
+            # Lost a race: another request claimed this exact session_id and
+            # committed its INSERT first (the "does it exist yet" check above
+            # and this INSERT aren't atomic together - each is its own
+            # store.run() lock acquisition). The winner's row is now the
+            # source of truth; use it rather than raising past the mediator.
+            #
+            # Two known, accepted residual gaps on this narrow path (a
+            # verification-pass finding): (1) if resolution.is_new_task was
+            # True, the Task row created just above is now orphaned - no
+            # session ever attaches to it. It's inert (grants no privilege,
+            # nothing reads an orphaned task_id back out), so left as-is
+            # rather than adding transactional rollback for a rare race
+            # window. (2) resolution.edge, if any, is silently dropped rather
+            # than recorded against the winner. What *is* fixed here: the
+            # race itself must still be visible in the audit trail rather
+            # than vanishing silently - an audit tool losing events on its
+            # own race conditions would be a real regression.
+            winner = await sessions_store.get_session(self._store, session_id)
+            if winner is not None:
+                builder = EventBuilder(self._new_id, self._clock)
+                event = builder.build(
+                    session_id=session_id, task_id=winner.task_id, identity_id=self._identity.identity_id,
+                    event_type=EventType.CONCURRENT_SESSION_ANOMALY, severity=Severity.HIGH,
+                    detail={
+                        "reason": f"session_id '{session_id}' collided with a concurrently-created session (create race)",
+                        "claimed_session_id": claimed_session_id, "claimed_parent_session_id": claimed_parent,
+                        "claimed_task_id": claimed_task,
+                    },
+                )
+                await append_event(self._store, event)
+                return winner
+            raise
         if resolution.edge is not None:
             await sessions_store.record_session_edge(self._store, resolution.edge)
 
@@ -185,6 +237,10 @@ class AgentWardenProxy:
         tool_name = str(params.get("name", ""))
         arguments = dict(params.get("arguments") or {})
         meta = dict(ctx.meta or {})
+        for key in (META_SESSION_KEY, META_PARENT_SESSION_KEY, META_TASK_KEY):
+            claimed = meta.get(key)
+            if claimed is not None and not _is_valid_claimed_id(claimed):
+                return errors.deny_result(f"invalid '{key}' in request metadata: must match {_CLAIMED_ID_PATTERN.pattern}")
         session = await self._resolve_or_create_session(meta)
         return await mediate_tool_call(self._mediator_deps, session=session, task_id=session.task_id, tool_name=tool_name, arguments=arguments)
 

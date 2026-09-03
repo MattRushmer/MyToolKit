@@ -190,7 +190,7 @@ async def _dispatch_allowed(
         tool_name=tool_name, arguments=arguments, redacted_arguments=redacted_arguments,
         outcome=CallOutcome.ALLOWED if succeeded else CallOutcome.ERROR, matched_rule_id=matched_rule_id,
         grant_id=grant.grant_id, started_at=started_at,
-        event_type=EventType.TOOL_CALL_ALLOWED if succeeded else EventType.GRANT_ISSUED, severity=Severity.INFO,
+        event_type=EventType.TOOL_CALL_ALLOWED if succeeded else EventType.TOOL_CALL_ERROR, severity=Severity.INFO,
         detail={"grant_id": grant.grant_id},
     )
     return result

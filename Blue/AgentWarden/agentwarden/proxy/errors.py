@@ -9,7 +9,3 @@ from mcp_types import CallToolResult, TextContent
 
 def deny_result(message: str) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=f"AgentWarden denied this call: {message}")], is_error=True)
-
-
-def unknown_tool_result(tool_name: str) -> CallToolResult:
-    return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {tool_name}")], is_error=True)
