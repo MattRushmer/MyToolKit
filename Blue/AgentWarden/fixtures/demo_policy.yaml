@@ -1,0 +1,32 @@
+version: 1
+identities:
+  - identity: "coding-agent"
+    enforcement: enforce
+    default: deny
+    rules:
+      - tool: "write_file"
+        upstream: "fs-mcp"
+        ttl_seconds: 60
+        argument_constraints:
+          path: {path_within: "/workspace/"}
+
+      - tool: "create_pr"
+        upstream: "github-mcp"
+        max_uses_per_task: 3
+        ttl_seconds: 300
+        argument_constraints:
+          repo: {in: ["my-org/allowed-repo"]}
+
+      # Explicitly forbidden (not just "no rule") - stays visible in
+      # tools/list so a caller sees AgentWarden's own denial, and a call
+      # here is a POLICY_DENIED, not a SCOPE_VIOLATION (the tool itself is
+      # forbidden, independent of arguments).
+      - tool: "merge_pr"
+        upstream: "github-mcp"
+        deny: true
+
+      # The whole payments upstream is denied for this identity - no
+      # coding-agent task should ever reach a payments tool at all.
+      - tool: "*"
+        upstream: "payments-mcp"
+        deny: true
