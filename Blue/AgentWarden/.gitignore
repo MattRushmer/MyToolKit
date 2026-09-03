@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+output/
+.pytest_cache/
+*.egg-info/
+error.log
+*.db
+*.db-journal
+.agentwarden_state/
+report.json
+report.md

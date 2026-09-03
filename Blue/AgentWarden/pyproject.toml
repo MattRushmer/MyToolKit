@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentwarden"
+version = "0.1.0"
+description = "Runtime credential broker and policy engine for AI-agent-held credentials over MCP: mints short-lived scoped grants per tool call, tracks agent delegation chains, and flags scope violations and blast-radius anomalies instead of governing static service-account keys."
+requires-python = ">=3.10"
+
+[project.scripts]
+agentwarden = "cli.main:app"
+
+[tool.setuptools]
+packages = [
+    "agentwarden",
+    "agentwarden.store",
+    "agentwarden.policy",
+    "agentwarden.broker",
+    "agentwarden.proxy",
+    "agentwarden.analysis",
+    "agentwarden.llm",
+    "agentwarden.report",
+    "cli",
+    "fixtures",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
