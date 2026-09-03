@@ -1,0 +1,72 @@
+================================================================================
+AGENTWARDEN - INSTALLATION AND USAGE GUIDE
+================================================================================
+
+WHAT THIS IS
+--------------------------------------------------------------------------------
+AgentWarden is a runtime credential broker and policy engine for AI-agent-held
+credentials over MCP:
+
+  1. Proxies MCP tool calls between an agent host and real upstream servers
+  2. Mints a short-lived scoped authorization per call, enforces YAML policy
+     (least-privilege by default) with argument-constraint predicates
+  3. Tracks agent delegation chains (root session -> sub-agent -> task) via a
+     caller-declared session id (see README's Known limitations for why)
+  4. Flags policy denials, scope violations, rate-limit abuse, and
+     blast-radius escalation, with a tamper-evident (hash-chained) audit log
+  5. Computes a task's full blast radius: every upstream/tool reached or
+     attempted across its whole delegation subtree
+
+================================================================================
+1. REQUIREMENTS
+================================================================================
+  - Python 3.10 or newer
+  - An Anthropic API key (optional - only used by `review-task`)
+
+================================================================================
+2. INSTALLATION
+================================================================================
+  Windows (PowerShell or Git Bash):
+    python -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -e .
+
+  macOS/Linux:
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install -e .
+
+Then, optionally:
+    cp env.example .env
+    # edit .env and set ANTHROPIC_API_KEY=sk-ant-... for review-task
+
+================================================================================
+3. USAGE
+================================================================================
+    agentwarden check-setup
+    agentwarden demo
+    agentwarden audit --db .agentwarden_state/demo.db
+    agentwarden blast-radius --db .agentwarden_state/demo.db --task demo-root-session
+    agentwarden list-sessions --db .agentwarden_state/demo.db
+    agentwarden grants --db .agentwarden_state/demo.db --session demo-root-session
+    agentwarden revoke --db .agentwarden_state/demo.db --session demo-root-session
+    agentwarden review-task --db .agentwarden_state/demo.db --task demo-root-session
+    agentwarden serve my-config.yaml --port 8642
+
+================================================================================
+4. TRY IT WITHOUT A REAL MCP SERVER
+================================================================================
+    agentwarden demo
+
+Runs a scripted six-step task against three in-memory demo MCP servers with
+fixtures/demo_policy.yaml, printing every allow/deny AgentWarden makes. Never
+point these fixture servers or their fake tools at anything real.
+
+================================================================================
+5. RUNNING TESTS
+================================================================================
+    .venv\Scripts\python -m pytest          (Windows)
+    .venv/bin/python -m pytest              (macOS/Linux)
+
+No network calls or real subprocess/port usage - the whole suite runs over
+the mcp SDK's in-memory transport.
